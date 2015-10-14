@@ -23,6 +23,7 @@ void stdio_init();
 void stdio_init2(void* buf, size_t size);
 void stdio_dump(int coreno, int fd, char* buffer, volatile size_t* head, volatile size_t* tail, size_t size);
 
+int stdio_putchar(const char ch);
 void stdio_scancode(int code);
 int stdio_getchar();
 
