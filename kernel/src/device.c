@@ -2,9 +2,11 @@
 #include <string.h>
 #include <errno.h>
 #include "device.h"
-#include "module.h"
 #include "pci.h"
 #include "driver/pci.h"
+#ifdef _KERNEL_
+#include "module.h"
+#endif
 
 #define MAX_DEVICE_COUNT	256
 
@@ -65,7 +67,7 @@ Device* device_get(DeviceType type, int idx) {
 	
 	return NULL;
 }
-
+#ifdef _KERNEL_
 int device_module_init() {
 	int count = 0;
 	for(int i = 0; i < module_count; i++) {
@@ -83,3 +85,4 @@ int device_module_init() {
 	
 	return count;
 }
+#endif

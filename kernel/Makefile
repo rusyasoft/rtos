@@ -23,9 +23,9 @@ OBJS = obj/entry.o \
 	obj/string.o obj/module.o obj/symbols.o \
 	obj/driver/dummy.o \
 	obj/driver/vga.o obj/driver/keyboard.o obj/driver/stdin.o obj/driver/stdout.o obj/driver/bfs.o \
-	obj/driver/port.o \
+	obj/driver/pcie.o \
 	obj/vm.o obj/manager.o \
-	obj/driver/pata.o \
+	obj/driver/pata.o obj/driver/virtio_blk.o obj/driver/virtio_ring.o \
 	obj/driver/fs.o obj/driver/disk.o obj/driver/file.o $(USB)
 
 LIBS = ../lib/libtlsf.a ../lib/libcore.a ../lib/liblwip.a

@@ -8,6 +8,7 @@
 #include "driver/fs.h"
 #include "driver/bfs.h"
 #include "driver/pata.h"
+#include "driver/virtio_blk.h"
 #include "driver/usb/usb.h"
 
 #define DEBUG	0
@@ -78,10 +79,13 @@ void main(void) {
 		usb_initialize();
 		print(50, 7, "Pass", PASS);
 
+		pci_init();
+
 		print(0, 8, "Initializing disk drivers", NORMAL);
 		disk_init0();
-		disk_register(&pata_driver);
-		disk_register(&usb_msc_driver);
+		disk_register(&virtio_blk_driver);
+//		disk_register(&pata_driver);
+//		disk_register(&usb_msc_driver);
 	
 		if(disk_init()) {
 			print(50, 8, "Pass", PASS);

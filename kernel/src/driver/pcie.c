@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "../pci.h"
 #include "device.h"
-#include "port.h"
+#include "pcie.h"
 
 int port_init(void* device, void* data) {
 	return 0;

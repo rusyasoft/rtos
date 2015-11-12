@@ -14,11 +14,11 @@ OBJS = ether.o crc.o checksum.o ni.o interface.o status.o  \
 	malloc.o types.o _string.o _malloc.o rpc.o readline.o \
 	arp.o icmp.o \
 	packet.o ip.o udp.o tcp.o tftp.o cmd.o \
-	cache.o	md5.o 
+	cache.o	md5.o event.o
 
 OBJS_32 := $(OBJS)	
 
-OBJS += md5_asm.o event.o 
+OBJS += md5_asm.o #event.o 
 
 CFLAGS = -I include -I ../TLSF/src -I ../jsmn -O2 -Wall -Werror -nostdlib -ffreestanding -fno-stack-protector -std=gnu99
 

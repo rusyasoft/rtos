@@ -107,7 +107,7 @@ uint64_t event_timer_add(EventFunc func, void* context, clock_t delay, clock_t p
  * @param period callback will be called regularly in every period
  * @return true if deregistered
  */
-bool event_timer_update(uint64_t id, clock_t period);
+bool event_timer_update(uintptr_t id, clock_t period);
 
 /**
  * Deregister timer event
