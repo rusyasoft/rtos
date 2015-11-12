@@ -15,7 +15,7 @@ USB = obj/driver/usb/usbinit.o obj/driver/usb/usb.o obj/driver/usb/usb_dev.o \
       obj/driver/usb/ctype.o obj/driver/usb/printf.o \
 
 OBJS = obj/main.o obj/page.o obj/mode_switch.o obj/driver/bfs.o obj/driver/pata.o \
-       obj/port.o obj/driver/fs.o obj/string.o obj/cpu.o \
+       obj/port.o obj/pci.o obj/device.o obj/driver/pcie.o obj/driver/fs.o obj/driver/virtio_blk.o obj/driver/virtio_ring.o obj/string.o obj/cpu.o \
        obj/driver/disk.o obj/driver/file.o $(USB) 
 
 LIBS = ../lib/libtlsf_32.a ../lib/libcore_32.a

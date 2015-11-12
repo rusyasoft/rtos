@@ -5,7 +5,7 @@
 #include "device.h"
 #include "port.h"
 #include "gmalloc.h"
-#include "driver/port.h"
+#include "driver/pcie.h"
 
 #include "pci.h"
 
@@ -340,8 +340,9 @@ int pci_probe(DeviceType type, PCI_DEVICE_PROBE probe, Driver* driver) {
 			int len = strlen(name) + 1;
 			pci->name = malloc(len);
 			memcpy(pci->name, name, len);
-			
+#ifdef _KERNEL_
 			printf("\tPCI device probed: id: %d, vendor: %04x, device: %04x, name: %s\n", i, pci->vendor_id, pci->device_id, pci->name);
+#endif
 			
 			count++;
 		}

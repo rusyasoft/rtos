@@ -73,7 +73,11 @@ static bool get_first_bigger(void* time, void* node) {
 	return (clock_t)time < ((TimerNode*)node)->delay;
 }
 
+#ifdef _KERNEL_
 static clock_t next_timer = INT64_MAX;
+#else
+static clock_t next_timer = INT32_MAX;
+#endif
 
 int event_loop() {
 	int count = 0;
@@ -111,15 +115,17 @@ int event_loop() {
 			if(index == -1) {
 				if(!list_add(timer_events, node)) {
 					free(node);
-
+#ifdef _KERNEL_
 					printf("Timer event lost unexpectedly cause of memory lack!!!\n");
+#endif
 					while(1) __asm__ __volatile__  ("hlt");
 				}
 			} else {
 				if(!list_add_at(timer_events, index, node)) {
 					free(node);
-
+#ifdef _KERNEL_
 					printf("Timer event lost unexpectedly cause of memory lack!!!\n");
+#endif
 					while(1) __asm__ __volatile__  ("hlt");
 				}
 			}
@@ -130,7 +136,11 @@ int event_loop() {
 		if(list_size(timer_events) > 0)
 			next_timer = ((TimerNode*)list_get_first(timer_events))->delay;
 		else
+#ifdef _KERNEL_
 			next_timer = INT64_MAX;
+#else
+			next_timer = INT32_MAX;
+#endif
 		
 		count++;
 	}
@@ -207,14 +217,14 @@ uint64_t event_timer_add(EventFunc func, void* context, clock_t delay, clock_t p
 	return (uintptr_t)node;
 }
 
-bool event_timer_update(uint64_t id, clock_t period) {
+bool event_timer_update(uintptr_t id, clock_t period) {
 	if(list_remove_data(timer_events, (void*)id)) {
 		TimerNode* node = (TimerNode*)id;
 		uint64_t time = time_us();
 		node->period = period;
 		node->delay = time + node->period;
 		
-		int index = list_index_of(timer_events, (void*)(uint64_t)node->delay, get_first_bigger);
+		int index = list_index_of(timer_events, (void*)(uintptr_t)node->delay, get_first_bigger);
 		if(index == -1) {
 			if(!list_add(timer_events, node)) {
 				free(node);
@@ -242,7 +252,11 @@ bool event_timer_remove(uint64_t id) {
 		if(list_size(timer_events) > 0)
 			next_timer = ((TimerNode*)list_get_first(timer_events))->delay;
 		else
+#ifdef _KERNEL_
 			next_timer = INT64_MAX;
+#else
+			next_timer = INT32_MAX;
+#endif
 		
 		return true;
 	} else {

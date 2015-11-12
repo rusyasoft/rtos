@@ -465,23 +465,25 @@ static int virtio_blk_init(DiskDriver* driver, DiskDriver** disks) {
 	priv->vq_blk->vring = gmalloc(sizeof(Vring));
 
 	count = pci_probe(virtio_device_type, virtio_device_probe, &virtio_pci_driver);
+	if(!count) {
+		return -1;
+	}
 
 	// Virtio device PCI probing 
 	err = virtio_pci_probe(priv->vq_blk->vdev);
 	if(err) {
-		printf("virtio_pci_probe failed: %d\n", err);
+		return -2;
 	}
 	// Feature synchronizing with host OS
 	err = synchronize_features(priv->vq_blk->vdev);
 	if(err) {
-		printf("synchronize_features failed: %d\n", err);
+		return -3;
 	}
 
 	// Initialize virtqueue & vring
 	err = init_vq(priv->vq_blk);
 	if(err) {
-		printf("init_vq err : %d\n", err);
-		return -1;
+		return -4;
 	}
 
 	// Disk attachment

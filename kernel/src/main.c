@@ -31,6 +31,7 @@
 #include "device.h"
 #include "driver/usb/usb.h"
 #include "driver/pata.h"
+#include "driver/virtio_blk.h"
 #include "driver/fs.h"
 #include "driver/bfs.h"
 #include "driver/dummy.h"
@@ -309,8 +310,12 @@ void main(void) {
 		printf("Initializing USB controller driver...\n");
 		usb_initialize();
 
+		printf("Initializing PCI...\n");
+		pci_init();
+
 		printf("Initializing disk drivers...\n");
 		disk_init0();
+		disk_register(&virtio_blk_driver);
 		disk_register(&pata_driver);
 		disk_register(&usb_msc_driver);
 		disk_init();
@@ -340,9 +345,6 @@ void main(void) {
 		printf("Initializing ACPI...\n");
 		acpi_init();
 		
-		printf("Initializing PCI...\n");
-		pci_init();
-
 		printf("Initializing APICs...\n");
 		apic_activate();
 		
