@@ -318,6 +318,7 @@ void main(void) {
 		disk_register(&virtio_blk_driver);
 		disk_register(&pata_driver);
 		disk_register(&usb_msc_driver);
+
 		disk_init();
 
 		printf("Initializing file system...\n");
