@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <util/types.h>
 
 extern char __stdin[];
 extern volatile size_t __stdin_head;
