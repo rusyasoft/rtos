@@ -5,6 +5,7 @@
 #include <string.h>
 #include <util/event.h>
 #include <time.h>
+#include <file.h>
 #include "asm.h"
 #include "gdt.h"
 #include "idt.h"
@@ -31,6 +32,7 @@
 #include "device.h"
 #include "driver/usb/usb.h"
 #include "driver/pata.h"
+#include "driver/virtio_blk.h"
 #include "driver/fs.h"
 #include "driver/bfs.h"
 #include "driver/dummy.h"
@@ -44,7 +46,6 @@
 #include <util/cmd.h>
 
 #define VGA_BUFFER_PAGES	12
-
 //static uint64_t idle_time;
 extern Device* nic_devices[];
 
@@ -74,6 +75,28 @@ static bool idle0_event(void* data) {
 		NICDriver* nic = nic_current->driver;
 		
 		poll_count += nic->poll(nic_current->id);
+	}
+
+	// Poll FIO
+#define MAX_VM_COUNT	128
+	uint32_t vmids[MAX_VM_COUNT];
+	int vm_count = vm_list(vmids, MAX_VM_COUNT);
+	for(int i = 0; i < vm_count; i++) {
+		VM* vm = vm_get(vmids[i]);
+		VFIO* fio = vm->fio;
+		if(!fio)
+			continue;
+
+		if(!fio->input_addr)
+			continue;
+
+		// Check if user changed request_id on purpose, and fix it
+		if(fio->user_fio->request_id != fio->request_id + fifo_size(fio->input_addr))
+			fio->user_fio->request_id = fio->request_id + fifo_size(fio->input_addr);
+
+		// Check if there's something in the input fifo
+		if(fifo_size(fio->input_addr) > 0);
+			vfio_poll(vm);
 	}
 
 	// idle
@@ -156,7 +179,7 @@ static void context_switch() {
 static void icc_start(ICC_Message* msg) {
 	printf("Loading VM... \n");
 	VM* vm = msg->data.start.vm;
-	
+
 	// TODO: Change blocks[0] to blocks
 	uint32_t id = loader_load(vm);
 
@@ -169,14 +192,14 @@ static void icc_start(ICC_Message* msg) {
 		printf("Execution FAILED: %x\n", errno);
 		return;
 	}
-	
+
 	*(uint32_t*)task_addr(id, SYM_NIS_COUNT) = vm->nic_count;
 	NetworkInterface** nis = (NetworkInterface**)task_addr(id, SYM_NIS);
 	for(int i = 0; i < vm->nic_count; i++) {
 		task_resource(id, RESOURCE_NI, vm->nics[i]);
 		nis[i] = vm->nics[i]->ni;
 	}
-	
+		
 	printf("Starting VM...\n");
 	ICC_Message* msg2 = icc_alloc(ICC_TYPE_STARTED);
 	
@@ -309,10 +332,14 @@ void main(void) {
 		printf("Initializing USB controller driver...\n");
 		usb_initialize();
 
+		printf("Initializing PCI...\n");
+		pci_init();
+
 		printf("Initializing disk drivers...\n");
 		disk_init0();
-		disk_register(&pata_driver);
-		disk_register(&usb_msc_driver);
+		disk_register(&virtio_blk_driver);
+//		disk_register(&pata_driver);
+//		disk_register(&usb_msc_driver);
 		disk_init();
 
 		printf("Initializing file system...\n");
@@ -340,9 +367,6 @@ void main(void) {
 		printf("Initializing ACPI...\n");
 		acpi_init();
 		
-		printf("Initializing PCI...\n");
-		pci_init();
-
 		printf("Initializing APICs...\n");
 		apic_activate();
 		
@@ -461,18 +485,21 @@ void main(void) {
 		icc_register(ICC_TYPE_RESUME, icc_resume);
 		icc_register(ICC_TYPE_STOP, icc_stop);
 		apic_register(49, icc_pause);
-		
+
 		if(CPU_IS_MONITOR_MWAIT & CPU_IS_MWAIT_INTERRUPT)
 			event_idle_add(idle_monitor_event, NULL);
 		else
 			event_idle_add(idle_hlt_event, NULL);
+
 	}
 
 	mp_sync();
 
-	if(core_id == 0)
+	if(core_id == 0) {
 		exec("/init.psh");
+	}
 
-	while(1)
+	while(1) {
 		event_loop();
+	}
 }
