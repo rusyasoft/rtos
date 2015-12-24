@@ -35,8 +35,8 @@ void module_init() {
 		return ;
 
 	// Open root directory
-	File* dir = opendir("/");
-	if(!dir) 
+	int fd = opendir("/");
+	if(fd < 0) 
 		return;
 
 	int len;
@@ -44,7 +44,7 @@ void module_init() {
 	// Memory map pointer
 	uint8_t* ptr = (uint8_t*)mmap;
 
-	while((dirent = readdir(dir))) {
+	while((dirent = readdir(fd))) {
 		if(strstr((const char*)dirent->name, ".ko") + 3 - (char*)dirent->name == strlen((const char*)dirent->name)) {
 			// Attach root directory for full path
 			char file_name[FILE_MAX_NAME_LEN];
@@ -78,7 +78,7 @@ void module_init() {
 		}
 	}
 
-	closedir(dir);
+	closedir(fd);
 
 	// Extend kernel code/rodata area
 	*size += addr - org_addr;
