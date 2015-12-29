@@ -45,7 +45,7 @@ bool fs_init() {
 		for(int i = 0; i < count; i++) {
 			if(fs_mount(driver->type, ids[i], "/") == 0) {
 				// Cache size is (FS_CACHE_BLOCK * FS_BLOCK_SIZE(normally 4K))
-				cache = cache_create(FS_CACHE_BLOCK, gfree, NULL); 
+				cache = cache_create(FS_CACHE_BLOCK, free, NULL); 
 				if(!cache) {
 					printf("Create cache fail\n");
 					return false;
@@ -209,7 +209,7 @@ ssize_t fs_read(File* file, void* buffer, size_t size) {
 		void* read_buf = cache_get(cache, (void*)(uintptr_t)sector);
 
 		if(!read_buf) {
-			read_buf = gmalloc(FS_BLOCK_SIZE);
+			read_buf = malloc(FS_BLOCK_SIZE);
 			if(!read_buf) {
 				printf("malloc error\n");
 				return -1;
@@ -228,8 +228,7 @@ ssize_t fs_read(File* file, void* buffer, size_t size) {
 			}
 		}
 
-		memcpy((uint32_t*)((uint8_t*)buffer + read_count),
-				(uint32_t*)(read_buf + offset_in_cluster), read_size);
+		memcpy((void*)((uint8_t*)buffer + read_count), (void*)(read_buf + offset_in_cluster), read_size);
 
 		read_count += read_size;
 		file->offset += read_size;
