@@ -16,7 +16,7 @@ void symbols_init() {
 	}
 
 	Stat state;
-	if(stat("kernel.smap", &state) != 0) {
+	if(stat(fd, &state) != 0) {
 		printf("\tCannot get state of file: %s\n", "kernel.smap");
 		return ;
 	}
