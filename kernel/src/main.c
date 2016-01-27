@@ -407,7 +407,7 @@ void main(void) {
 		printf("Initializing I/O APIC...\n");
 		ioapic_init();
 		apic_enable();
-		
+
 		printf("Initializing Multi-tasking...\n");
 		task_init();
 		
@@ -432,7 +432,7 @@ void main(void) {
 		module_init();
 
 		printf("Initializing device drivers...\n");
-		device_module_init(); //
+		device_module_init();
 
 		uint16_t nic_devices_count = device_count(DEVICE_TYPE_NIC);
 		printf("Finding NICs: %d\n", nic_devices_count);

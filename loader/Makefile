@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-CFLAGS = -I../lib/TLSF/src -I../lib/core/include -m32 -masm=intel -ffreestanding -std=gnu99 #-DUSB_DEBUG
+CFLAGS = -I../lib/TLSF/src -I../lib/core/include -m32 -masm=intel -ffreestanding -std=gnu99 -D__MODE_32_BIT__#-DUSB_DEBUG
 
 DIR = obj obj/driver obj/driver/usb 
 
