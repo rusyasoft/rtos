@@ -1,6 +1,6 @@
 #include "apic.h"
 
-static uint32_t apic_address;
+uint32_t apic_address;
 
 void apic_init() {
 	uint32_t a, c = 0x1b;

@@ -115,12 +115,14 @@ void cursor() {
 	if(!video)
 		return;
 	
-	uint32_t pos =  ((uint32_t)video - 0xb8000) / 2;
-	
-	asm volatile("outb %%al, %%dx" : : "d"(0x3d4), "a"(0x0f));
-	asm volatile("outb %%al, %%dx" : : "d"(0x3d5), "a"(pos & 0xff));
-	asm volatile("outb %%al, %%dx" : : "d"(0x3d4), "a"(0x0e));
-	asm volatile("outb %%al, %%dx" : : "d"(0x3d5), "a"((pos >> 8) & 0xff));
+	/*
+	 *uint32_t pos =  ((uint32_t)video - 0xb8000) / 2;
+	 *
+	 *asm volatile("outb %%al, %%dx" : : "d"(0x3d4), "a"(0x0f));
+	 *asm volatile("outb %%al, %%dx" : : "d"(0x3d5), "a"(pos & 0xff));
+	 *asm volatile("outb %%al, %%dx" : : "d"(0x3d4), "a"(0x0e));
+	 *asm volatile("outb %%al, %%dx" : : "d"(0x3d5), "a"((pos >> 8) & 0xff));
+	 */
 }
 
 void dump(char* title, uint32_t addr, int size) {

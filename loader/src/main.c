@@ -524,14 +524,14 @@ void activate_aps() {
 		APIC_DM_PHYSICAL |
 		APIC_DMODE_STARTUP |
 		0x10);   // Startup address: 0x10 = 0x10000 / 4KB
-	
-	time_uwait(200);
-	
+
 	if(apic_read32(APIC_REG_ICR) & APIC_DS_PENDING) {
 		log_fail(0x00, "STARTUP IPI is pending");
 	}
+	print(".");
 	
 	log_pass();
+	print(".");
 }
 
 void main(uint32_t magic, uint32_t addr) {
@@ -552,6 +552,7 @@ void main(uint32_t magic, uint32_t addr) {
 		
 		time_init();
 		apic_init();
+
 		activate_aps();
 		
 		// 64bit kernel arguments

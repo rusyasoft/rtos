@@ -11,33 +11,10 @@ NIC = virtio #rtl8139
 
 QEMU = qemu-system-x86_64 $(shell tools/qemu-params) -m 1024 -M pc -smp 8 -d cpu_reset -net nic,model=$(NIC) -net tap,script=tools/qemu-ifup -net nic,model=$(NIC) -net tap,script=tools/qemu-ifup $(VIRTIO) $(USB) --no-shutdown --no-reboot  #$(HDD)
 
-all: system.img
 
-system.img: 
-	make -C lib
-	mkdir -p bin
-	make -C tools
-	make -C boot
-	make -C loader
-	make -C kernel
-	make -C drivers
-	# Make system map and kernel
-	sudo bin/smap kernel/kernel.elf kernel.smap
-	bin/pnkc kernel/kernel.elf kernel.smap kernel.bin
-	# Make init ram disk image
-	sudo tools/mkinitrd initrd.img 1 drivers/*.ko
-	# Make system.img
-	tools/mkimage system.img 64 3 12 fat32 fat32 ext2 loader/loader.bin kernel.bin initrd.img
-
-mount:
-	mkdir mnt
-	sudo losetup /dev/loop0 root.img
-	sudo mount /dev/loop0 mnt
-
-umount:
-	sudo umount mnt
-	sudo losetup -d /dev/loop0
-	rmdir mnt
+all:
+	@echo "Build PacketNgin RTOS image"
+	make -f Build.make
 
 ver:
 	@echo $(shell git tag).$(shell git rev-list HEAD --count)
@@ -79,16 +56,16 @@ stop:
 deploy: system.img
 	tools/deploy
 
-clean:
-	rm -f system.img root.img kernel.smap kernel.bin kernel.dis packetngin_sdk-*.tgz
-	make -C kernel clean 
-	make -C drivers clean
+#clean:
+	#rm -f system.img root.img kernel.smap kernel.bin kernel.dis packetngin_sdk-*.tgz
+	#make -C kernel clean 
+	#make -C drivers clean
 
-cleanall: clean
-	rm -rf bin
-	make -C boot clean
-	make -C loader clean
-	make -C kernel clean
-	make -C drivers clean
-	make -C lib cleanall
-	make -C tools clean
+#cleanall: clean
+	#rm -rf bin
+	#make -C boot clean
+	#make -C loader clean
+	#make -C kernel clean
+	#make -C drivers clean
+	#make -C lib cleanall
+	#make -C tools clean

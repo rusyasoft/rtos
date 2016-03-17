@@ -9,6 +9,7 @@ SECTIONS
 /*********************************************************************************/
   .text 0xffffffff80200000 :
   {
+    *(.entry)
     *(.text .stub .text.* .gnu.linkonce.t.*)
     /* .gnu.warning sections are handled specially by elf32.em.  */
     *(.gnu.warning)

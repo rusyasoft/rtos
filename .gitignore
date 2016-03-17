@@ -24,6 +24,7 @@ kernel.dis
 kernel.smap
 *.swp
 *.tmp
+*.bak
 
 # SDK
 sdk/bin/console

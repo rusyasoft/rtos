@@ -37,7 +37,7 @@ section .entry
 
 header_start:
 	dd	0xe85250d6			; multiboot2 magic
-	dd	0				; architecture 0 (i386)
+	dd	0				    ; architecture 0 (i386)
 	dd	header_end - header_start	;
 	dd	0x100000000 - (0xe85250d6 + 0 + (header_end - header_start))	; checksum
 	
