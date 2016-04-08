@@ -2,6 +2,7 @@
 #define __NET_IP_H__
 
 #include <net/packet.h>
+#include <net/ether.h>
 
 /**
  * @file
@@ -50,5 +51,5 @@ typedef struct _IP {
  * @param ip_body_len IP body length in bytes
  */
 void ip_pack(Packet* packet, uint16_t ip_body_len);
- 
+
 #endif /* __NET_IP_H__ */

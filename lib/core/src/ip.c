@@ -1,4 +1,3 @@
-#include <net/ether.h>
 #include <net/ip.h>
 #include <net/checksum.h>
 

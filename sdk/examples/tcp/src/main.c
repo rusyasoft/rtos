@@ -15,7 +15,6 @@
 #include <readline.h>
 
 #define address 0xc0a8640a
-TCB* tcb;
 
 void destroy() {
 }
