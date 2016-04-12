@@ -43,7 +43,7 @@ typedef struct {
 } TCB;
 
 static uint32_t ip_id;
-static Map* tcbs;
+static Map* tcbs = NULL;
 
 static bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str);
 
@@ -106,14 +106,7 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 }
 
 TCB* tcb_find(uint32_t tcb_key) {
-	TCB* tcb;
-
-	if(!map_contains(tcbs,(void *)(uintptr_t)tcb_key)) {
-		printf("no map \n");
-		return NULL;	
-	}
-
-	tcb = map_get(tcbs, (void*)(uintptr_t)tcb_key);
+	TCB* tcb = map_get(tcbs, (void*)(uintptr_t)tcb_key);
 
 	if(tcb == NULL) {
 		printf("tcb is null \n");
@@ -164,8 +157,10 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 	TCB* tcb;
 	uint32_t tcb_key;
 	NetworkInterface* ni = ni_get(0);
-
-	tcbs = map_create(4, map_uint64_hash, map_uint64_equals, NULL);
+	
+	if(tcbs == NULL)
+		tcbs = map_create(4, map_uint64_hash, map_uint64_equals, NULL);
+	
 	tcb = tcb_create(ni, dst_addr, dst_port, callback);
 
 	if(tcb == NULL) {
