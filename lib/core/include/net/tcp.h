@@ -9,6 +9,7 @@
  */
 
 #define TCP_LEN			20		///< TCPv4 header length
+//#define tcp_mss(kind, length, value) endian32((((uint8_t)(kind) & 0xf) << 24) | (((uint8_t)(length) & 0xf) << 16) | ((uint16_t)(value)))
 
 /**
  * TCPv4 header
@@ -46,6 +47,31 @@ typedef struct _TCP_Pseudo {
 	uint8_t         protocol;		///< TCP protocol number, 0x06
 	uint16_t        length;			///< Header and data length in bytes (endian32)
 } __attribute__((packed)) TCP_Pseudo;
+
+typedef int (*connected)(uint32_t socket, uint32_t addr, uint16_t port, void* context);
+typedef int (*bound)(uint32_t socket, uint32_t addr, uint16_t port, void* context);
+typedef int (*disconnected)(uint32_t socket);
+typedef int (*sent)(uint32_t socket, const void* buf, size_t len, void* context);
+typedef int (*received)(uint32_t socket, const void* buf, size_t len, void* context);
+
+typedef struct {
+	connected connected;
+	bound bound;
+	disconnected disconnected;
+	sent sent;
+	received received;
+} TCPCallback;
+
+Packet* tcp_process(Packet* packet);
+//TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port); 
+void tcp_set_callback(uint32_t socket, TCPCallback* callback, void* context);
+TCPCallback* tcp_get_callback(uint32_t socket);
+TCPCallback* tcp_callback_create();
+void* tcp_get_context(uint32_t socket);
+
+int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, void* context);
+int tcp_send(uint32_t socket, const void* buf, size_t len);
+//int tcp_close(uint64_t socket);
 
 /**
  * Allocate TCP port number which associated with NI.
