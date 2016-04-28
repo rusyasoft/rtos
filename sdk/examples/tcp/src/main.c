@@ -63,15 +63,12 @@ void client_init(){
 	callback->sent = (sent)my_sent;
 	callback->received = (received)my_received;
 	tcp_connect(server_ip, server_port, callback, NULL);
+	printf("hshshshsh \n");
 }
 
 void process(NetworkInterface* ni){
 	Packet* packet = ni_input(ni);
-
-	if(arp_process(packet))
-		return;
-	
-	if(tcp_process(packet))
+	if(ether_process(packet))
 		ni_free(packet);		
 }
 
@@ -89,6 +86,7 @@ int main(int argc, char** argv) {
 	thread_barrior();
 	
 	NetworkInterface* ni = ni_get(0);
+	event_init();
 	while(1) {
 		if(ni_has_input(ni)) {
 			process(ni);
@@ -100,6 +98,7 @@ int main(int argc, char** argv) {
 				client_init();
 			} 
 		}
+		event_loop();
 	}
 	
 	thread_barrior();

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <util/event.h>
 
 #include <net/packet.h>
 #include <net/ni.h>
@@ -13,17 +14,19 @@
 #define MAX_SQUENCENUM 	2147483648
 #define ADDRESS 0xc0a8640a
 
-#define TCP_CLOSED		1
-#define TCP_LISTEN 		2
-#define TCP_SYN_RVCD		3
-#define TCP_SYN_SENT		4
-#define TCP_ESTABLISHED		5
-#define TCP_CLOSE_WAIT		6
-#define TCP_LAST_ACK		7
-#define TCP_FIN_WAIT_1		8
-#define TCP_FIN_WAIT_2		9
-#define TCP_CLOSING		10
-#define TCP_TIME_WAIT		11
+#define TCP_CLOSED		0	
+#define TCP_LISTEN 		1
+#define TCP_SYN_RVCD		2
+#define TCP_SYN_SENT		3
+#define TCP_ESTABLISHED		4
+#define TCP_CLOSE_WAIT		5
+#define TCP_LAST_ACK		6
+#define TCP_FIN_WAIT_1		7
+#define TCP_FIN_WAIT_2		8
+#define TCP_CLOSING		9
+#define TCP_TIME_WAIT		10
+#define TCP_TCB_CREATED		11
+
 
 typedef struct {
 	uint32_t sip;
@@ -43,6 +46,7 @@ typedef struct {
 } TCB;
 
 static uint32_t ip_id;
+static int arp_state;
 static Map* tcbs;
 
 static bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str);
@@ -100,18 +104,13 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 	
 	tcb->state = TCP_CLOSED;
 	tcb->seq = tcp_init_seqnum();
-	tcb->ackno = 0;
+	tcb->ackno = 0; //TODO : ackno
 	tcb->callback = callback;
 	return tcb;
 }
 
 TCB* tcb_find(uint32_t tcb_key) {
 	TCB* tcb;
-
-	if(!map_contains(tcbs,(void *)(uintptr_t)tcb_key)) {
-		printf("no map \n");
-		return NULL;	
-	}
 
 	tcb = map_get(tcbs, (void*)(uintptr_t)tcb_key);
 
@@ -144,30 +143,40 @@ TCPCallback* tcp_get_callback(uint32_t socket) {
 	return callback;
 }
 
-bool tcp_pre_process(NetworkInterface* ni, TCB* tcb) {
-	arp_request(ni,tcb->dip, tcb->sip);
-	while(1){
-		if(ni_has_input(ni)) {
-			Packet* packet = ni_input(ni);
-			if(arp_process(packet)) {
-				break;
-			}
-		}
+bool arp_pre_process(void* context) {
+	TCB* tcb = context;
+	if((arp_state == 1) && (tcb->state == TCP_CLOSED)) {
+		tcb->state = TCP_TCB_CREATED;
+		//printf("arp_pre_process success \n");
+		return false;
 	}
+	return true;
+}
 
-	//gonna put other inits too
-	ip_init_id();
-	return false;
+bool tcp_syn_send(void* context) {
+	TCB* tcb = context;
+	if(tcb->state == TCP_TCB_CREATED){
+		if(packet_out(tcb,1, 0, 0, 0, NULL) == true) {
+			tcb->state = TCP_SYN_SENT; 
+			printf("tcb state changed SYN_SENT\n");
+			//printf("syn send success \n");
+			return false;
+		} else {
+			tcb->state = TCP_CLOSED;
+			//printf("syn send  did not success \n");
+		}
+	}	
+	return true;
 }
 
 int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, void* context) {
 	TCB* tcb;
 	uint32_t tcb_key;
 	NetworkInterface* ni = ni_get(0);
+	arp_state = 0;
 
 	tcbs = map_create(4, map_uint64_hash, map_uint64_equals, NULL);
 	tcb = tcb_create(ni, dst_addr, dst_port, callback);
-
 	if(tcb == NULL) {
 		printf("tcb NULL\n");
 		return -1;
@@ -177,31 +186,13 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 			return -1;
 		}
 	}
+	ip_init_id();
 
-	tcp_pre_process(ni,tcb);
+	arp_request(ni,tcb->dip, tcb->sip);
+	//TODO : timer event
+	event_busy_add(arp_pre_process, tcb);
+	event_busy_add(tcp_syn_send, tcb);
 
-	if(packet_out(tcb,1, 0, 0, 0, NULL) == true) {
-		tcb->state = TCP_SYN_SENT; 
-		printf("tcb state changed SYN_SENT\n");
-	} else {
-		tcb->state = TCP_CLOSED;
-	}
-
-	//TODO: timeout
-	while(tcb->state != TCP_ESTABLISHED) {
-		if(ni_has_input(ni)) {
-			Packet* packet = ni_input(ni);
-			if(packet == NULL) {
-				printf("packet is null \n");
-				return -1;
-			}
-			if(!arp_process(packet)) {
-				tcp_process(packet);
-			}
-		}
-	}
-
-	tcb->callback->connected(tcb_key, dst_addr, dst_port, context);
 	return tcb_key;
 }
 
@@ -212,30 +203,16 @@ int tcp_send(uint32_t socket, const void* buf, size_t len) {
 	return 1;	
 }
 
-Packet* tcp_process(Packet* packet) {
+IP* tcp_process(IP* ip) {
 	uint32_t tcb_key;
 	TCB* tcb;
-
-	Ether* ether = (Ether*)(packet->buffer + packet->start);
-	if(endian16(ether->type) != ETHER_TYPE_IPv4) { 
-		return packet;
-	}
-	IP* ip = (IP*)ether->payload;
-	if(ip->protocol != IP_PROTOCOL_TCP) {
-		return packet;
-	}
-
+	
 	TCP* tcp = (TCP*)ip->body;
 	tcb_key = tcb_key_create(ip->destination,tcp->destination);
 	tcb = tcb_find(tcb_key);
-
-	if(tcb == NULL) {
-		printf("tcb is NULL");
-		return packet;
-	}
-							
+						
 	if(endian16(tcp->source) != tcb->dport) {
-		return packet;
+		return ip;
 	}
 
 	switch(tcb->state) {
@@ -244,14 +221,17 @@ Packet* tcp_process(Packet* packet) {
 			break; 
 		case TCP_SYN_SENT:
 			if(tcp->syn == 1 && tcp->ack == 1) {
+				printf("here\n");
 				uint32_t sequence = tcp->sequence;	
 				tcb->ackno = endian32(sequence)+1;
+				//send ack
 				if(packet_out(tcb, 0, 1, 0, 0, NULL)) {
+					tcb->callback->connected(tcb_key, tcb->dip, tcb->dport, tcb->context);
 					(tcb->ackno) = endian32(sequence)+1;
 					tcb->state = TCP_ESTABLISHED;
 					printf("tcb state changed ESTABLISHED \n");
 				} 
-				return packet;
+				return ip;
 			} else if (tcp->rst == 1) {
 				//TODO: timeout
 				tcb->state = TCP_CLOSED;
@@ -278,7 +258,7 @@ Packet* tcp_process(Packet* packet) {
 					memcpy(value, tcp->payload + idx, len);
 					idx += len;
 					tcb->callback->received(tcb_key,value,len +1,NULL);
-					return packet;
+					return ip;
 				} else if(tcp->urg == 1) {
 					//TODO: no logic decided 
 				} else if(tcp->fin == 1) {
@@ -292,14 +272,58 @@ Packet* tcp_process(Packet* packet) {
 		case TCP_CLOSING:
 			//TODO: no logic decided 
 			break;
+		default:
+			return ip;
 	}
-	return packet;
+	return ip;
+}
+
+Ether* ip_process(Ether* ether) {
+	IP* ip = (IP*)ether->payload;
+	switch(ip->protocol) {
+		case IP_PROTOCOL_ICMP: 	
+			break;
+		case IP_PROTOCOL_UDP:
+			break;
+		case IP_PROTOCOL_TCP:
+			if(tcp_process(ip))
+				return ether;
+			break;
+		default:
+			return ether;
+	}
+
+	return ether;
+}
+
+Packet* ether_process(Packet* packet) {
+	Ether* ether = (Ether*)(packet->buffer + packet->start);
+	switch(endian16(ether->type)) {
+		case ETHER_TYPE_IPv4:
+			if(ip_process(ether))
+				return packet;
+			break;
+		case ETHER_TYPE_ARP:
+			if(arp_process(packet)){
+				arp_state = 1;
+				return NULL;
+			}
+			break;
+		default:
+			return packet;
+	}
+	return NULL;
 }
 
 bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str) {
 	printf("send_packet start \n");
 	NetworkInterface* ni = ni_get(0);	
-	Packet* packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + strlen(str)+1);
+	Packet* packet;
+	if(str != NULL) {	
+		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + strlen(str)+1);
+	} else {
+		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP));
+	}
 
 	Ether* ether = (Ether*)(packet->buffer + packet->start);
 	ether->dmac = endian48(arp_get_mac(ni,tcb->dip,tcb->sip));
