@@ -12,7 +12,7 @@
 #define _FILE_TEST_H
 
 /** The id of this fixture. */
-#define A_FIXTURE_ID 5
+#define A_FIXTURE_ID 2
 
 #include "AceUnit.h"
 
@@ -22,8 +22,8 @@ A_Test void test_close(void);
 
 /** The test case ids of this fixture. */
 static const TestCaseId_t testIds[] = {
-    6, /* test_open */
-    7, /* test_close */
+    3, /* test_open */
+    4, /* test_close */
 };
 
 #ifndef ACEUNIT_EMBEDDED
@@ -82,7 +82,7 @@ static const testMethod_t afterClass[] = {
 extern
 #endif
 const TestFixture_t file_testFixture = {
-    5,
+    2,
 #ifndef ACEUNIT_EMBEDDED
     "file_test",
 #endif

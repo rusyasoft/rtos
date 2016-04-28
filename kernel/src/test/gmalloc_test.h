@@ -12,7 +12,7 @@
 #define _GMALLOC_TEST_H
 
 /** The id of this fixture. */
-#define A_FIXTURE_ID 2
+#define A_FIXTURE_ID 8
 
 #include "AceUnit.h"
 
@@ -22,8 +22,8 @@ A_Test void test_gmalloc_max(void);
 
 /** The test case ids of this fixture. */
 static const TestCaseId_t testIds[] = {
-    3, /* test_gmalloc_repeat */
-    4, /* test_gmalloc_max */
+    9, /* test_gmalloc_repeat */
+    10, /* test_gmalloc_max */
 };
 
 #ifndef ACEUNIT_EMBEDDED
@@ -82,7 +82,7 @@ static const testMethod_t afterClass[] = {
 extern
 #endif
 const TestFixture_t gmalloc_testFixture = {
-    2,
+    8,
 #ifndef ACEUNIT_EMBEDDED
     "gmalloc_test",
 #endif

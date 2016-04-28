@@ -6,6 +6,7 @@
 #include <net/ether.h>
 #include <net/arp.h>
 #include <util/map.h>
+#include <stdio.h>
 
 #define ARP_TABLE	"net.arp.arptable"
 #define ARP_TABLE_GC	"net.arp.arptable.gc"
@@ -103,7 +104,7 @@ bool arp_process(Packet* packet) {
 			entity->mac = smac;
 			entity->timeout = current + ARP_TIMEOUT;
 			
-done:
+		done:
 			ni_free(packet);
 			return true;
 	} 
