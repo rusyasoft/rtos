@@ -5,6 +5,7 @@
 #include <net/interface.h>
 #include <errno.h>
 #include <_malloc.h>
+#include <stdio.h>
 
 int __nis_count;
 NetworkInterface* __nis[NIS_SIZE];
@@ -31,7 +32,6 @@ Packet* ni_alloc(NetworkInterface* ni, uint16_t size) {
 		packet->start = (((uintptr_t)packet->buffer + 4 /* VLAN padding */ + ALIGN - 1) & ~(ALIGN - 1)) - (uintptr_t)packet->buffer;
 		packet->end = packet->start + size;
 	}
-	
 	return packet;
 }
 

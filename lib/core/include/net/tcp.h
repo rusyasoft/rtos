@@ -62,7 +62,8 @@ typedef struct {
 	received received;
 } TCPCallback;
 
-Packet* tcp_process(Packet* packet);
+//Packet* tcp_process(Packet* packet);
+Packet* ether_process(Packet* packet);
 //TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port); 
 void tcp_set_callback(uint32_t socket, TCPCallback* callback, void* context);
 TCPCallback* tcp_get_callback(uint32_t socket);

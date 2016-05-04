@@ -12,7 +12,7 @@
 #define _LOCK_TEST_H
 
 /** The id of this fixture. */
-#define A_FIXTURE_ID 8
+#define A_FIXTURE_ID 5
 
 #include "AceUnit.h"
 
@@ -22,8 +22,8 @@ A_Test void test_lock_unlock(void);
 
 /** The test case ids of this fixture. */
 static const TestCaseId_t testIds[] = {
-    9, /* test_lock_lock */
-    10, /* test_lock_unlock */
+    6, /* test_lock_lock */
+    7, /* test_lock_unlock */
 };
 
 #ifndef ACEUNIT_EMBEDDED
@@ -82,7 +82,7 @@ static const testMethod_t afterClass[] = {
 extern
 #endif
 const TestFixture_t lock_testFixture = {
-    8,
+    5,
 #ifndef ACEUNIT_EMBEDDED
     "lock_test",
 #endif
