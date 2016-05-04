@@ -68,8 +68,27 @@ void client_init(){
 
 void process(NetworkInterface* ni){
 	Packet* packet = ni_input(ni);
-	if(ether_process(packet))
-		ni_free(packet);		
+	if(!packet)
+		return;
+
+	Ether* ether = (Ether*)(packet->buffer + packet->start);
+
+	if(endian16(ether->type) == ETHER_TYPE_ARP) {
+		if(arp_process(packet))
+			return;
+	} else if(endian16(ether->type) == ETHER_TYPE_IPv4) {
+		IP* ip = (IP*)ether->payload;
+
+		if(ip->protocol == IP_PROTOCOL_ICMP && endian32(ip->destination) == address) {
+		} else if(ip->protocol == IP_PROTOCOL_UDP) {
+		
+		} else if(ip->protocol == IP_PROTOCOL_TCP) {
+			tcp_process(ip);
+		}
+	}
+	
+	if(packet)
+		ni_free(packet);
 }
 
 int main(int argc, char** argv) {

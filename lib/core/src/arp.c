@@ -18,7 +18,51 @@ typedef struct {
 	uint64_t	timeout;
 } ARPEntity;
 
+typedef struct {
+	uint64_t timeout;
+	void* context;
+	bool (*func)(void*);
+} Callback;
+
+static Map* arp_callbacks = NULL;
+
 uint32_t ARP_TIMEOUT = 14400;	// 4 hours
+
+static bool arp_callback_process(uint32_t ip) {
+	if(!arp_callbacks)
+		return false;
+	
+	List* callback_list = map_get(arp_callbacks, (void*)(uintptr_t)ip);
+	if(!callback_list)
+		return false;
+	
+	ListIterator iter;
+	list_iterator_init(&iter, callback_list);
+
+	uint64_t current = timer_us(); 
+	
+	while(list_iterator_has_next(&iter)) {
+		Callback* callback = list_iterator_next(&iter);
+		if(callback->timeout < current) {
+			list_iterator_remove(&iter);
+			free(callback);
+			continue;
+		}
+
+		if(callback->func(callback->context)) {
+			list_iterator_remove(&iter);
+			free(callback);
+			continue;
+		}
+	}
+
+	if(list_is_empty(callback_list)) {
+		list_destroy(callback_list);
+		map_remove(arp_callbacks, (void*)(uintptr_t)ip);
+	}
+
+	return true;
+}
 
 bool arp_process(Packet* packet) {
 	extern uint64_t __timer_ms;
@@ -103,7 +147,7 @@ bool arp_process(Packet* packet) {
 			}
 			entity->mac = smac;
 			entity->timeout = current + ARP_TIMEOUT;
-			
+			arp_callback_process(sip);
 		done:
 			ni_free(packet);
 			return true;
@@ -199,6 +243,46 @@ bool arp_announce(NetworkInterface* ni, uint32_t ip) {
 	}
 }
 
+static bool arp_set_callback(uint32_t destination, uint64_t timeout, void* context, bool (*func)(void*)) {
+	if(!arp_callbacks) {
+		arp_callbacks = map_create(10, NULL, NULL, NULL);
+		if(!arp_callbacks)
+			return false;
+	}
+
+	List* callback_list = map_get(arp_callbacks, destination);
+	if(!callback_list) {
+		callback_list = list_create(NULL);
+		if(!callback_list)
+			return false;
+		
+		if(!map_put(arp_callbacks, (void*)(uintptr_t)destination, callback_list)) {
+			list_destroy(callback_list);
+			return false;
+		}
+	}
+	
+	Callback* callback = malloc(sizeof(Callback));
+	if(!callback)
+		return false;
+
+	uint64_t currunt = timer_us();
+	callback->timeout = currunt + timeout;
+	callback->context = context;
+	callback->func = func;
+
+	if(!list_add(callback_list, callback)) {
+		free(callback);
+		if(list_is_empty(callback_list)) {
+			list_destroy(callback_list);
+			map_remove(arp_callbacks, (void*)(uintptr_t)destination);
+		}
+		return false;
+	}
+
+	return true;
+}
+
 uint64_t arp_get_mac(NetworkInterface* ni, uint32_t destination, uint32_t source) {
 	Map* arp_table = ni_config_get(ni, ARP_TABLE);
 	if(!arp_table) {
@@ -209,6 +293,26 @@ uint64_t arp_get_mac(NetworkInterface* ni, uint32_t destination, uint32_t source
 	ARPEntity* entity = map_get(arp_table, (void*)(uintptr_t)destination);
 	if(!entity) {
 		arp_request(ni, destination, source);
+		return 0xffffffffffff;
+	}
+	
+	return entity->mac;
+}
+
+
+uint64_t arp_get_mac_callback(NetworkInterface* ni, uint32_t destination, uint32_t source, uint64_t timeout, void* context, bool (*func)(void*)) {
+	Map* arp_table = ni_config_get(ni, ARP_TABLE);
+
+	if(!arp_table) {
+		if(arp_set_callback(destination, timeout, context, func))
+			arp_request(ni, destination, source);
+		return 0xffffffffffff;
+	}
+	
+	ARPEntity* entity = map_get(arp_table, (void*)(uintptr_t)destination);
+	if(!entity) {
+		if(arp_set_callback(destination, timeout, context, func))
+			arp_request(ni, destination, source);
 		return 0xffffffffffff;
 	}
 	

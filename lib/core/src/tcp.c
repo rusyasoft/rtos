@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <malloc.h>
 #include <util/event.h>
 
 #include <net/packet.h>
@@ -26,7 +27,6 @@
 #define TCP_CLOSING		9
 #define TCP_TIME_WAIT		10
 #define TCP_TCB_CREATED		11
-
 
 typedef struct {
 	uint32_t sip;
@@ -141,29 +141,18 @@ TCPCallback* tcp_get_callback(uint32_t socket) {
 	return callback;
 }
 
-bool arp_pre_process(void* context) {
-	TCB* tcb = context;
-	if((arp_state == 1) && (tcb->state == TCP_CLOSED)) {
-		tcb->state = TCP_TCB_CREATED;
-		//printf("arp_pre_process success \n");
-		return false;
-	}
-	return true;
-}
-
 bool tcp_syn_send(void* context) {
+	printf("tcp_syn_send in!!!\n");
 	TCB* tcb = context;
-	if(tcb->state == TCP_TCB_CREATED){
 		if(packet_out(tcb,1, 0, 0, 0, NULL) == true) {
 			tcb->state = TCP_SYN_SENT; 
 			printf("tcb state changed SYN_SENT\n");
 			//printf("syn send success \n");
-			return false;
+			return true;
 		} else {
 			tcb->state = TCP_CLOSED;
 			//printf("syn send  did not success \n");
 		}
-	}	
 	return true;
 }
 
@@ -188,10 +177,7 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 	}
 	ip_init_id();
 
-	arp_request(ni,tcb->dip, tcb->sip);
-	//TODO : timer event
-	event_busy_add(arp_pre_process, tcb);
-	event_busy_add(tcp_syn_send, tcb);
+	arp_get_mac_callback(ni, tcb->dip, tcb->sip, 3 * 1000000, (void*)tcb, tcp_syn_send);
 
 	return tcb_key;
 }
@@ -278,42 +264,6 @@ IP* tcp_process(IP* ip) {
 	return ip;
 }
 
-Ether* ip_process(Ether* ether) {
-	IP* ip = (IP*)ether->payload;
-	switch(ip->protocol) {
-		case IP_PROTOCOL_ICMP: 	
-			break;
-		case IP_PROTOCOL_UDP:
-			break;
-		case IP_PROTOCOL_TCP:
-			if(tcp_process(ip))
-				return ether;
-			break;
-		default:
-			return ether;
-	}
-
-	return ether;
-}
-
-Packet* ether_process(Packet* packet) {
-	Ether* ether = (Ether*)(packet->buffer + packet->start);
-	switch(endian16(ether->type)) {
-		case ETHER_TYPE_IPv4:
-			if(ip_process(ether))
-				return packet;
-			break;
-		case ETHER_TYPE_ARP:
-			if(arp_process(packet)){
-				arp_state = 1;
-				return NULL;
-			}
-			break;
-		default:
-			return packet;
-	}
-	return NULL;
-}
 
 bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str) {
 	printf("send_packet start \n");
