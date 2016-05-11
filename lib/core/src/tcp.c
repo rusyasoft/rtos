@@ -28,6 +28,9 @@
 #define TCP_TIME_WAIT		10
 #define TCP_TCB_CREATED		11
 
+#define SND_WND_MAX 43690
+#define RECV_WND_MAX 43690
+
 typedef struct {
 	uint32_t sip;
 	uint16_t sport;
@@ -43,6 +46,12 @@ typedef struct {
 	uint64_t timer_id;
 	TCPCallback* callback;
 	void* context;
+
+	List* seg_sent;	// sent segment but no ack.
+	uint32_t snd_wnd_max;
+	uint32_t snd_wnd_cur;
+	uint32_t recv_wnd_max;
+	uint32_t recv_wnd_cur;
 } TCB;
 
 static uint32_t ip_id;
@@ -106,6 +115,9 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 	tcb->seq = tcp_init_seqnum();
 	tcb->ackno = 0; //TODO : ackno
 	tcb->callback = callback;
+
+	tcb->recv_wnd_max = RECV_WND_MAX;
+	tcb->snd_wnd_max = SND_WND_MAX;
 	return tcb;
 }
 
@@ -134,11 +146,10 @@ TCPCallback* tcp_get_callback(uint32_t socket) {
 	TCPCallback* callback;
 
 	if(tcb->callback == NULL) {
-		callback = tcp_callback_create();	
+		return tcp_callback_create();	
 	} else {
-		callback = tcb->callback;
+		return tcb->callback;
 	}
-	return callback;
 }
 
 bool tcp_syn_send(void* context) {
@@ -185,7 +196,7 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 int tcp_send(uint32_t socket, const void* buf, size_t len) {
 	TCB* tcb = tcb_find(socket);		
 	packet_out(tcb, 0, 1, 1, 0, buf);
-	tcb->callback->sent(socket, buf, len, NULL);
+	tcb->callback->sent(socket, buf, len, NULL);	//TODO:sent() should be called when receive ack.
 	return 1;	
 }
 
@@ -285,7 +296,8 @@ bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str) {
         ip->version = endian8(4);
         ip->ecn = endian8(0); 
         ip->dscp = endian8(0);
-	ip_id = ip_get_id(ack);
+	
+		ip_id = ip_get_id(ack);
         ip->id = endian16(ip_id);
         ip->flags_offset = 0x40;
         ip->ttl = endian8(IP_TTL);
