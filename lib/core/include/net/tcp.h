@@ -62,15 +62,58 @@ typedef struct {
 	received received;
 } TCPCallback;
 
-//Packet* tcp_process(Packet* packet);
-Packet* ether_process(Packet* packet);
-//TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port); 
-void tcp_set_callback(uint32_t socket, TCPCallback* callback, void* context);
-TCPCallback* tcp_get_callback(uint32_t socket);
-TCPCallback* tcp_callback_create();
-void* tcp_get_context(uint32_t socket);
+/**
+ * Process all TCP packet.
+ *
+ * @param ip IP Packet 
+ * @return input ip if there was no error
+ */
+IP* tcp_process(IP* ip);
 
+/**
+ * Get callbacks pointer of socket.
+ *
+ * @param socket socket number
+ * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
+ */
+TCPCallback* tcp_get_callback(uint32_t socket);
+
+/**
+ * Set callbacks pointer of socket.
+ *	
+ * @param socket socket number
+ * @param callback new callbacks to set
+ * @param context callback's context
+ * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
+ */
+void tcp_set_callback(uint32_t socket, TCPCallback* callback, void* context);
+
+/**
+ * Allocate Memory to hold callback functions.
+ *
+ * @return NULL if fail, else TCPCallback pointer 
+ */
+TCPCallback* tcp_callback_create();
+//void* tcp_get_context(uint32_t socket);
+
+/**
+ * Connect to remote computer, Send SYN packet.
+ *
+ * @param dst_addr remote computer's IP address
+ * @param dst_port remote computer's port
+ * @param callback this connection's callback functions
+ * @return < 0 if error occurred, else socket number used tcb_key internally
+ */
 int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, void* context);
+
+/**
+ * Send data.
+ *
+ * @param socket TCP socket 
+ * @param buf data's pointer
+ * @param len data's length
+ * @return -1 if fail to send, else sent data size
+ */
 int tcp_send(uint32_t socket, const void* buf, size_t len);
 //int tcp_close(uint64_t socket);
 

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <gmalloc.h>
 #include <util/event.h>
 
 #include <net/packet.h>
@@ -47,20 +48,31 @@ typedef struct {
 	TCPCallback* callback;
 	void* context;
 
-	List* seg_sent;	// sent segment but no ack.
-	uint32_t snd_wnd_max;
-	uint32_t snd_wnd_cur;
-	uint32_t recv_wnd_max;
-	uint32_t recv_wnd_cur;
+	List* seg_unack;	// sent segment but no ack.
+	uint16_t snd_wnd_max;
+	uint16_t snd_wnd_cur;
+	uint16_t recv_wnd_max;
+	uint16_t recv_wnd_cur;
 } TCB;
+
+typedef struct {
+	uint32_t seq;	// host endian
+	uint8_t syn: 1;
+	uint8_t ack: 1;
+	uint8_t psh: 1;
+	uint8_t fin: 1;
+
+	uint16_t len;
+	void* data;
+} Segment;
 
 static uint32_t ip_id;
 static int arp_state;
 static Map* tcbs = NULL;
 
-static bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str);
+static bool packet_out(TCB* tcb, uint8_t syn, uint8_t ack, uint8_t psh, uint8_t fin, const void* data, int len); 
 
-static uint32_t tcp_init_seqnum() {
+	static uint32_t tcp_init_seqnum() {
 	uint64_t time;
 	uint32_t* p = (uint32_t*)&time;
 	asm volatile("rdtsc" : "=a"(p[0]), "=d"(p[1]));
@@ -115,9 +127,12 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 	tcb->seq = tcp_init_seqnum();
 	tcb->ackno = 0; //TODO : ackno
 	tcb->callback = callback;
-
+	
+	tcb->seg_unack = list_create(NULL);
 	tcb->recv_wnd_max = RECV_WND_MAX;
+	tcb->recv_wnd_cur = RECV_WND_MAX;
 	tcb->snd_wnd_max = SND_WND_MAX;
+	tcb->snd_wnd_cur = SND_WND_MAX;
 	return tcb;
 }
 
@@ -143,7 +158,6 @@ TCPCallback* tcp_callback_create() {
 
 TCPCallback* tcp_get_callback(uint32_t socket) {
 	TCB* tcb = tcb_find(socket);
-	TCPCallback* callback;
 
 	if(tcb->callback == NULL) {
 		return tcp_callback_create();	
@@ -153,18 +167,19 @@ TCPCallback* tcp_get_callback(uint32_t socket) {
 }
 
 bool tcp_syn_send(void* context) {
-	printf("tcp_syn_send in!!!\n");
 	TCB* tcb = context;
-		if(packet_out(tcb,1, 0, 0, 0, NULL) == true) {
-			tcb->state = TCP_SYN_SENT; 
-			printf("tcb state changed SYN_SENT\n");
-			//printf("syn send success \n");
-			return true;
-		} else {
-			tcb->state = TCP_CLOSED;
-			//printf("syn send  did not success \n");
-		}
-	return true;
+	
+	if(packet_out(tcb,1, 0, 0, 0, NULL, 0)) {
+		tcb->state = TCP_SYN_SENT; 
+		tcb->seq++;
+		printf("tcb state changed SYN_SENT\n");
+		
+		return true;
+	} else {
+		tcb->state = TCP_CLOSED;
+		
+		return false;
+	}
 }
 
 int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, void* context) {
@@ -194,10 +209,23 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 }
 
 int tcp_send(uint32_t socket, const void* buf, size_t len) {
-	TCB* tcb = tcb_find(socket);		
-	packet_out(tcb, 0, 1, 1, 0, buf);
-	tcb->callback->sent(socket, buf, len, NULL);	//TODO:sent() should be called when receive ack.
-	return 1;	
+	TCB* tcb = tcb_find(socket);
+	if(!tcb)
+		return -1;
+	
+	if(tcb->snd_wnd_cur < len)
+		len = tcb->snd_wnd_cur;
+
+	tcb->snd_wnd_cur -= len;
+	
+	if(!packet_out(tcb, 0, 1, 1, 0, buf, len)) {
+		tcb->snd_wnd_cur += len;
+		return -1;
+	}
+	
+	tcb->seq = tcb->seq + len;
+
+	return len;	
 }
 
 IP* tcp_process(IP* ip) {
@@ -216,51 +244,61 @@ IP* tcp_process(IP* ip) {
 		case TCP_CLOSED:
 			printf("Connection is closed\n");
 			break; 
+
 		case TCP_SYN_SENT:
 			if(tcp->syn == 1 && tcp->ack == 1) {
-				printf("here\n");
-				uint32_t sequence = tcp->sequence;	
-				tcb->ackno = endian32(sequence)+1;
-				//send ack
-				if(packet_out(tcb, 0, 1, 0, 0, NULL)) {
-					tcb->callback->connected(tcb_key, tcb->dip, tcb->dport, tcb->context);
-					(tcb->ackno) = endian32(sequence)+1;
+				tcb->ackno = endian32(tcp->sequence) + 1;
+				tcb->snd_wnd_max = endian16(tcp->window);
+				tcb->snd_wnd_cur = endian16(tcp->window);
+
+				if(packet_out(tcb, 0, 1, 0, 0, NULL, 0)) {	// send ack
 					tcb->state = TCP_ESTABLISHED;
-					printf("tcb state changed ESTABLISHED \n");
-				} 
+					tcb->callback->connected(tcb_key, tcb->dip, tcb->dport, tcb->context);
+				}
 				return ip;
 			} else if (tcp->rst == 1) {
 				//TODO: timeout
 				tcb->state = TCP_CLOSED;
 			}
 			break;
+
 		case TCP_SYN_RVCD:
 			//TODO: server side	
 			break;
+
 		case TCP_ESTABLISHED:
-			if(tcp->ack == 0) {
-				//TODO: no logic decided 
-			} else if(tcp->ack == 1) {
-				if(tcp->psh == 1) {
-					uint32_t sequence = tcp->sequence;	
-					uint32_t acknowledge = tcp->acknowledgement;	
-					uint32_t temp = endian32(acknowledge) - (tcb->seq); 
-					(tcb->seq) = endian32(tcp->acknowledgement);	
-					(tcb->ackno) = endian32(sequence)+temp;
+			if(tcp->ack == 1) {
+				tcb->snd_wnd_max = endian16(tcp->window);
+				ListIterator iter;
+				list_iterator_init(&iter, tcb->seg_unack);
+
+				while(list_iterator_has_next(&iter)) {
+					Segment* seg = list_iterator_next(&iter);
 					
-					uint32_t idx = 0;
-					uint32_t len = strlen((char*)tcp->payload);
-					char value[len + 1];
-					value[len] = '\0';
-					memcpy(value, tcp->payload + idx, len);
-					idx += len;
-					tcb->callback->received(tcb_key,value,len +1,NULL);
-					return ip;
-				} else if(tcp->urg == 1) {
-					//TODO: no logic decided 
-				} else if(tcp->fin == 1) {
-					//TODO: no logic decided 
-				}		
+					if(seg->seq < tcp->acknowledgement) {
+						list_iterator_remove(&iter);
+						tcb->snd_wnd_cur += seg->len;							
+
+						if(tcb->snd_wnd_cur > tcb->snd_wnd_max)
+							tcb->snd_wnd_cur = tcb->snd_wnd_max;
+						tcb->callback->sent(tcb_key, seg->data, seg->len, tcb->context);
+					
+						gfree(seg->data);
+						gfree(seg);
+					}
+				}
+
+				uint16_t len = endian16(ip->length) - ip->ihl * 4 - tcp->offset * 4;
+				if(len > 0 && tcb->ackno == endian32(tcp->sequence)) {
+					tcb->ackno += len;
+
+					packet_out(tcb, 0, 1, 0, 0, NULL, 0);	//send ack
+					
+					tcb->callback->received(tcb_key, (uint8_t*)tcp + tcp->offset * 4, len, tcb->context);	// TODO: check last arg(context).
+				}
+
+			} else {
+				//TODO: no logic decided
 			}
 			break;
 		case TCP_LISTEN:
@@ -275,40 +313,50 @@ IP* tcp_process(IP* ip) {
 	return ip;
 }
 
+// TODO: function naming. and maybe need some modulization.
+static bool packet_out(TCB* tcb, uint8_t syn, uint8_t ack, uint8_t psh, uint8_t fin, const void* data, int len) {
+	NetworkInterface* ni = ni_get(0);
+	Packet* packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + len);
+	
+	if(!packet)
+		return false;
 
-bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str) {
-	printf("send_packet start \n");
-	NetworkInterface* ni = ni_get(0);	
-	Packet* packet;
-	if(str != NULL) {	
-		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + strlen(str)+1);
-	} else {
-		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP));
+	if(len != 0) {
+		Segment* segment = gmalloc(sizeof(Segment));
+		segment->seq = tcb->seq;
+		segment->syn = endian8(syn);
+		segment->ack = endian8(ack);
+		segment->psh = endian8(psh);
+		segment->fin = endian8(fin);
+		segment->len = len;
+		segment->data = gmalloc(len);
+		
+		memcpy(segment->data, data, len);
+		list_add(tcb->seg_unack, segment);
 	}
 
 	Ether* ether = (Ether*)(packet->buffer + packet->start);
 	ether->dmac = endian48(arp_get_mac(ni,tcb->dip,tcb->sip));
-        ether->smac = endian48(ni->mac);
-        ether->type = endian16(ETHER_TYPE_IPv4);
-
-	IP* ip = (IP*)ether->payload;
-        ip->ihl = endian8(5);
-        ip->version = endian8(4);
-        ip->ecn = endian8(0); 
-        ip->dscp = endian8(0);
+	ether->smac = endian48(ni->mac);
+	ether->type = endian16(ETHER_TYPE_IPv4);
 	
-		ip_id = ip_get_id(ack);
-        ip->id = endian16(ip_id);
-        ip->flags_offset = 0x40;
-        ip->ttl = endian8(IP_TTL);
-        ip->protocol = endian8(IP_PROTOCOL_TCP);
-        ip->source = endian32(tcb->sip);
-        ip->destination = endian32(tcb->dip);
+	IP* ip = (IP*)ether->payload;
+	ip->ihl = endian8(5);
+	ip->version = endian8(4);
+	ip->ecn = endian8(0); 
+	ip->dscp = endian8(0);
+
+	ip_id = ip_get_id(ack);
+	ip->id = endian16(ip_id);
+	ip->flags_offset = 0x40;
+	ip->ttl = endian8(IP_TTL);
+	ip->protocol = endian8(IP_PROTOCOL_TCP);
+	ip->source = endian32(tcb->sip);
+	ip->destination = endian32(tcb->dip);
 	
 	TCP* tcp = (TCP*)ip->body;
 	tcp->source = endian16(tcb->sport);
 	tcp->destination = endian16(tcb->dport);
-	tcp_get_seqnum(psh, tcb);
 	tcp->sequence = endian32(tcb->seq);
 	tcp->acknowledgement = endian32(tcb->ackno);
 	tcp->ns = endian8(0);
@@ -322,23 +370,10 @@ bool packet_out(TCB* tcb, int syn, int ack, int psh, int fin, const void* str) {
 	tcp->urg = endian8(0);
 	tcp->ece = endian8(0);
 	tcp->cwr = endian8(0);
-	tcp->window = endian16(29200);
+	tcp->window = endian16(tcb->recv_wnd_cur);
 	tcp->urgent = endian16(0);
-	
-	if(str != NULL) {
-		int str_len = strlen(str) + 1;
-		uint16_t size = packet->size + str_len - strlen((char*)tcp->payload) + 1 ;
-		uint16_t end = packet->end + str_len - strlen((char*)tcp->payload) + 1;
-		memcpy(tcp->payload, str, strlen(str)+1);
-		packet->size = size;
-		packet->end = end; 
-		ip->length = endian16(ip->ihl * 4 + tcp->offset *4 + str_len);
-		tcp_pack(packet, str_len); 
-	} else {
-		packet->end = packet->start + sizeof(Ether) + sizeof(IP) + sizeof(TCP);
-		ip->length = endian16(ip->ihl * 4 + tcp->offset *4 );
-		tcp_pack(packet, TCP_LEN - 20);
-	}
+	memcpy(tcp->payload, data, len);
+	tcp_pack(packet, len);
 
 	return ni_output(ni, packet);
 }
