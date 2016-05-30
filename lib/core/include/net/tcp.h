@@ -76,7 +76,7 @@ IP* tcp_process(IP* ip);
  * @param socket socket number
  * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
  */
-TCPCallback* tcp_get_callback(uint32_t socket);
+TCPCallback* tcp_get_callback(int32_t socket);
 
 /**
  * Set callbacks pointer of socket.
@@ -86,7 +86,7 @@ TCPCallback* tcp_get_callback(uint32_t socket);
  * @param context callback's context
  * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
  */
-void tcp_set_callback(uint32_t socket, TCPCallback* callback, void* context);
+void tcp_set_callback(int32_t socket, TCPCallback* callback, void* context);
 
 /**
  * Allocate Memory to hold callback functions.
@@ -114,8 +114,9 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
  * @param len data's length
  * @return -1 if fail to send, else sent data size
  */
-int tcp_send(uint32_t socket, const void* buf, size_t len);
-//int tcp_close(uint64_t socket);
+int tcp_send(int32_t socket, const void* buf, size_t len);
+
+int tcp_close(int32_t socket);
 
 /**
  * Allocate TCP port number which associated with NI.
