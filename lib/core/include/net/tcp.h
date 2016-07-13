@@ -62,6 +62,8 @@ typedef struct {
 	received received;
 } TCPCallback;
 
+bool tcp_timer(void* context);
+
 /**
  * Process all TCP packet.
  *

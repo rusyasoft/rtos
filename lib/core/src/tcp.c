@@ -2,6 +2,7 @@
 #include <string.h>
 #include <malloc.h>
 #include <gmalloc.h>
+#include <timer.h>
 #include <util/event.h>
 
 #include <net/packet.h>
@@ -31,6 +32,8 @@
 
 #define SND_WND_MAX 43690
 #define RECV_WND_MAX 43690
+#define ACK_TIMEOUT 2000000	// 2 sec
+#define MSL 10000000	// 10 sec 
 
 typedef struct {
 	uint32_t sip;
@@ -45,6 +48,7 @@ typedef struct {
 	uint32_t seq;
 	uint32_t ackno;
 	uint64_t timer_id;
+	uint64_t timeout;
 	TCPCallback* callback;
 	void* context;
 
@@ -57,6 +61,8 @@ typedef struct {
 } TCB;
 
 typedef struct {
+	uint64_t timeout;
+
 	uint32_t seq;	// host endian
 	uint8_t syn: 1;
 	uint8_t ack: 1;
@@ -70,8 +76,10 @@ typedef struct {
 static uint32_t ip_id;
 static int arp_state;
 static Map* tcbs = NULL;
+static List* time_wait_list = NULL;
 
 static bool packet_out(TCB* tcb, uint8_t syn, uint8_t ack, uint8_t psh, uint8_t fin, const void* data, int len); 
+
 
 static uint32_t tcp_init_seqnum() {
 	uint64_t time;
@@ -121,6 +129,14 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 	if(tcb == NULL)
 		printf("tcb NULL\n");
 	
+	tcb->seg_unack = list_create(NULL);
+	if(tcb->seg_unack == NULL) {
+		printf("list_create error\n");
+		free(tcb);
+		return NULL;
+	}
+
+	printf("init addr : %x, %x\n", tcb, tcb->seg_unack);
 	tcb->sip = ADDRESS; 
 	tcb->sport = tcp_port_alloc(ni, ADDRESS);
 	tcb->dip = addr;
@@ -131,12 +147,12 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t addr, uint16_t port, TCPCa
 	tcb->ackno = 0; //TODO : ackno
 	tcb->callback = callback;
 	
-	tcb->seg_unack = list_create(NULL);
 	tcb->recv_wnd_max = RECV_WND_MAX;
 	tcb->recv_wnd_cur = RECV_WND_MAX;
 	tcb->snd_wnd_max = SND_WND_MAX;
 	tcb->snd_wnd_cur = SND_WND_MAX;
 
+	printf("init ip : %x\n", tcb->sip);
 	tcb->ni = ni;
 	return tcb;
 }
@@ -162,7 +178,7 @@ static bool tcb_destroy(TCB* tcb) {
 		printf("map_remove error\n");
 
 	free(tcb);
-
+	printf("tcb_destory!!\n");
 	return true;
 }
 
@@ -217,27 +233,38 @@ int tcp_connect(uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, voi
 	NetworkInterface* ni = ni_get(0);
 	arp_state = 0;
 	
-	if(tcbs == NULL)
+	if(tcbs == NULL) {
 		tcbs = map_create(4, map_uint64_hash, map_uint64_equals, NULL);
-	
+		printf("tcbs created\n");
+
+		if(!tcbs)
+			return -1;
+	}
+		
 	tcb = tcb_create(ni, dst_addr, dst_port, callback);
+	printf("ret_create : %x\n", tcb);
 	if(tcb == NULL) {
 		printf("tcb NULL\n");
 		return -1;
 	} else {
 		tcb_key = tcb_key_create(endian32(tcb->sip), endian16(tcb->sport));	
-		if(!map_put(tcbs, (void*)(uintptr_t)tcb_key, (void*) tcb)) {
+		if(!map_put(tcbs, (void*)(uintptr_t)tcb_key, (void*)(uintptr_t) tcb)) {
 			printf("map_put error\n");
 			return -1;
 		}
 	}
+
 	ip_init_id();
 	printf("before arp\n");
 	uint64_t mac = arp_get_mac_callback(ni, tcb->dip, tcb->sip, 3 * 1000000, (void*)tcb, tcp_syn_send);
 	printf("after arp\n");
-	
-	if(mac != 0xffffffffffff)
+
+	if(mac != 0xffffffffffff) {
 		tcp_syn_send(tcb);
+		printf("after tcp_syn_send()\n");
+	}
+
+	printf("no mac\n");
 
 	return tcb_key;
 }
@@ -294,6 +321,7 @@ IP* tcp_process(IP* ip) {
 			break; 
 
 		case TCP_SYN_SENT:
+			printf("proc syn_sent\n");
 			if(tcp->syn == 1 && tcp->ack == 1) {
 				tcb->ackno = endian32(tcp->sequence) + 1;
 				tcb->snd_wnd_max = endian16(tcp->window);
@@ -315,6 +343,7 @@ IP* tcp_process(IP* ip) {
 			break;
 
 		case TCP_ESTABLISHED:
+			printf("proc establish\n");
 			if(tcp->ack == 1) {
 				tcb->snd_wnd_max = endian16(tcp->window);
 				ListIterator iter;
@@ -391,10 +420,12 @@ IP* tcp_process(IP* ip) {
 				if(tcb->seq == endian32(tcp->acknowledgement)) {
 					tcb->state = TCP_CLOSING;
 					tcb->state = TCP_TIME_WAIT;
-					tcb->state = TCP_CLOSED;
+					tcb->timeout = timer_us() +  MSL;
 					
-					tcb_destroy(tcb);
-
+					if(!time_wait_list) {
+						time_wait_list = list_create(NULL);
+					}
+					list_add(time_wait_list, tcb);
 				}
 			} else if(tcp->ack) {
 				ListIterator iter;
@@ -465,21 +496,36 @@ IP* tcp_process(IP* ip) {
 				if(tcp->fin && tcb->seq == endian32(tcp->acknowledgement)) {
 					tcb->ackno = endian32(tcp->sequence) + 1;
 					packet_out(tcb, 0, 1, 0, 0, NULL, 0); //send ack
-					tcb->state = TCP_TIME_WAIT;	//need to implement time wait
-					tcb->state = TCP_CLOSED;
-					tcb_destroy(tcb);
+					tcb->state = TCP_TIME_WAIT;	// TODO need to implement time wait
+					tcb->timeout = timer_us() +  MSL;
+					
+					if(!time_wait_list) {
+						time_wait_list = list_create(NULL);
+					}
+					list_add(time_wait_list, tcb);
 				}
 			}
 			break;
 		case TCP_CLOSING:
 			if(tcp->ack) {
 				if(tcb->seq == endian32(tcp->acknowledgement)) {
-					tcb->state = TCP_TIME_WAIT;	//need to implement time wait
-					tcb->state = TCP_CLOSED;
-					tcb_destroy(tcb);
+					tcb->state = TCP_TIME_WAIT;	//TODO need to implement time wait
+					tcb->timeout = timer_us() +  MSL;
+					
+					if(!time_wait_list) {
+						time_wait_list = list_create(NULL);
+					}
+					list_add(time_wait_list, tcb);
 				}
 			}
 			//TODO: no logic decided 
+			break;
+		case TCP_TIME_WAIT:
+			if(tcb->timeout < timer_us()) {
+				tcb->state = TCP_CLOSED;
+				tcb_destroy(tcb);
+			}
+
 			break;
 		default:
 			return ip;
@@ -504,7 +550,8 @@ static bool packet_out(TCB* tcb, uint8_t syn, uint8_t ack, uint8_t psh, uint8_t 
 		segment->fin = endian8(fin);
 		segment->len = len;
 		segment->data = gmalloc(len);
-		
+		segment->timeout = timer_us() + ACK_TIMEOUT;
+
 		memcpy(segment->data, data, len);
 		list_add(tcb->seg_unack, segment);
 	}
@@ -549,7 +596,57 @@ static bool packet_out(TCB* tcb, uint8_t syn, uint8_t ack, uint8_t psh, uint8_t 
 	memcpy(tcp->payload, data, len);
 	tcp_pack(packet, len);
 
+	printf("packet out!!\n");
 	return ni_output(ni, packet);
+}
+
+/*
+ * iterate tcbs and it's seg unacked list. compare timeout. if timeout is over, resend segment.
+ * 
+ */
+bool tcp_timer(void* context) {
+	uint64_t current = timer_us();
+
+	if(tcbs) {
+		MapIterator map_iter;
+		map_iterator_init(&map_iter, tcbs);
+
+		while(map_iterator_has_next(&map_iter)) {
+			MapEntry* entry = map_iterator_next(&map_iter); 
+			TCB* tcb = entry->data;
+
+			if(!tcb->seg_unack) 
+				continue;
+
+			ListIterator seg_iter;
+			list_iterator_init(&seg_iter, tcb->seg_unack);
+
+			while(list_iterator_has_next(&seg_iter)) {
+				Segment* segment = (Segment*)list_iterator_next(&seg_iter);
+				if(segment->timeout < current) {
+					// need to resend segment (packet_out())
+					
+				}
+			}
+		}
+	}
+	
+
+	if(time_wait_list) {
+		ListIterator iter;
+		list_iterator_init(&iter, time_wait_list);
+		while(list_iterator_has_next(&iter)) {
+			TCB* tcb = list_iterator_next(&iter);
+			printf("timeout : %d, cur : %d\n", tcb->timeout, current);
+			if(tcb->timeout < current) {
+				tcb->state = TCP_CLOSED;
+				tcb_destroy(tcb);
+			list_iterator_remove(&iter);
+			}
+		}
+	}
+
+	return true;
 }
 
 bool tcp_port_alloc0(NetworkInterface* ni, uint32_t addr, uint16_t port) {
