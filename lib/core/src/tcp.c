@@ -41,7 +41,7 @@
 #define CWR 0x80
 
 #define SND_WND_MAX 43690
-#define RECV_WND_MAX 1500
+#define RECV_WND_MAX 24576
 #define ACK_TIMEOUT 2000000	// 2 sec
 #define MSL 10000000	// 10 sec 
 #define SCALE 128
@@ -70,8 +70,8 @@ typedef struct {
 	void* context;
 
 	List* unack_list;	// sent segment but no ack.
-	uint32_t snd_wnd_max;
-	uint32_t snd_wnd_cur;
+	int32_t snd_wnd_max;
+	int32_t snd_wnd_cur;
 	uint32_t recv_wnd_max;
 	uint32_t last_ack;
 	NetworkInterface* ni;
@@ -146,7 +146,6 @@ TCPCallback* tcp_get_callback(int32_t socket) {
 }
 
 bool tcp_init() {
-	count2 = 0;
 	counter = false;
 	tcbs = map_create(4, map_uint64_hash, map_uint64_equals, NULL);
 	if(!tcbs) {
@@ -209,6 +208,10 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 	tcb->recv_wnd_max = RECV_WND_MAX;
 	tcb->snd_wnd_max = 0;
 	tcb->snd_wnd_cur = 0;
+
+	// debug
+	debug_max = &(tcb->snd_wnd_max);
+	debug_cur = &(tcb->snd_wnd_cur);
 
 	tcb->ni = ni;
 	return tcb;
@@ -322,15 +325,18 @@ bool tcp_close(uint32_t socket) {
 	return true;
 }
 
-int32_t tcp_send(uint32_t socket, void* data, const uint32_t len) {
+int32_t tcp_send(uint32_t socket, void* data, const int32_t len) {
 	if(len == 0)
 		return 0;
 
 	TCB* tcb = tcb_get(socket);
 	if(!tcb)
 		return -1;
-
+	/*
 	if(tcb->snd_wnd_max < tcb->snd_wnd_cur || tcb->snd_wnd_max	- tcb->snd_wnd_cur < len)
+		return -2;
+	*/
+	if(tcb->snd_wnd_max - tcb->snd_wnd_cur < len)
 		return -2;
 
 	if(!ni_output_available(tcb->ni))
@@ -390,7 +396,7 @@ bool tcp_process(Packet* packet) {
 				tcb->acknowledgement = endian32(tcp->sequence) + 1;
 				tcb->last_ack = endian32(tcp->ack);
 
-				tcb->snd_wnd_max = endian16(tcp->window); //* SCALE;
+				tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
 				tcb->snd_wnd_cur = 0;
 				
 				Packet* packet = packet_create(tcb, ACK, NULL, 0);
@@ -415,7 +421,6 @@ bool tcp_process(Packet* packet) {
 			//printf("proc establish\n");
 			if(tcp->ack == 1) {
 				uint32_t tmp_ack = endian32(tcp->acknowledgement);
-				count2 = tcb->snd_wnd_cur;
 
 				if(tcb->last_ack <= tcb->sequence) {
 					if(tcb->last_ack <= tmp_ack && tmp_ack <= tcb->sequence) {
@@ -474,16 +479,18 @@ bool tcp_process(Packet* packet) {
 				if(len > 0 && tcb->acknowledgement == endian32(tcp->sequence)) {
 					tcb->acknowledgement += len;
 
-					counter = !counter;
-					if(counter) {
+					//counter = !counter;
+					//if(counter) {
+					/*
 						Packet* packet = packet_create(tcb, ACK, NULL, 0);
 						if(!packet)
 							printf("sending ack fail in est\n");
 
 						if(!packet_out(tcb, packet, 0))	//send ack
 							printf("send ack fail\n");
+							*/
 						// TODO : if packet_out is failed, maybe ack will never send again...
-					}
+				//	}
 
 					tcb->callback->received(tcb_key, (uint8_t*)tcp + tcp->offset * 4, len, tcb->context);	// TODO: check last arg(context).
 				}

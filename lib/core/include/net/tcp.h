@@ -10,7 +10,8 @@
 
 #define TCP_LEN			20		///< TCPv4 header length
 
-uint32_t count2;
+int32_t* debug_cur;
+int32_t* debug_max;
 /**
  * TCPv4 header
  */
@@ -126,7 +127,7 @@ uint32_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port,
  * @param len data's length
  * @return -1 if fail to send, else sent data size
  */
-int32_t tcp_send(uint32_t socket, void* data, const uint32_t len);
+int32_t tcp_send(uint32_t socket, void* data, const int32_t len);
 
 bool tcp_close(uint32_t socket);
 
