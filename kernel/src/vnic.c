@@ -923,9 +923,9 @@ Packet* nic_process_output(uint8_t local_port) {
 			vnic->ni->output_bytes += size;
 			vnic->ni->output_packets++;
 			if(vnic->output_closed > time)
-				vnic->output_closed += vnic->input_wait * size;
+				vnic->output_closed += vnic->output_wait * size;
 			else
-				vnic->output_closed = time + vnic->input_wait * size;
+				vnic->output_closed = time + vnic->output_wait * size;
 
 
 			Ether* ether = (void*)(packet->buffer + packet->start);

@@ -16,7 +16,7 @@
 
 #define address 0xc0a8640a
 #define BUF_SIZE 1460
-#define SERVER_PORT 9003
+#define SERVER_PORT 9004
 
 extern uint32_t count2;
 uint64_t total_rcv;
@@ -29,8 +29,7 @@ uint8_t buffer[BUF_SIZE +1];
 bool bps_checker(void* context) {
 	//printf("%u bps\n", total_rcv * 8);
 	
-	printf("%u bps, %u, %u, %u, %u, %u, %u\n", total_rcv * 8, count2, err[1], err[2], err[3], err[4], err[5]);
-	count2 = 0;
+	printf("%u bps, %u, %u, %u, %u, %u, %u, %u\n", total_rcv * 8, *debug_max, *debug_cur,  err[1], err[2], err[3], err[4], err[5]);
 	err[2] = 0;
 	err[5] = 0;
 	
@@ -89,13 +88,10 @@ void ginit(int argc, char** argv) {
 	for(int i = 0; i < 6; i++) {
 		err[i] = 0;
 	}
-	printf("before init\n");
 	tcp_init();
-	printf("after init\n");
 	event_timer_add(bps_checker, NULL, 0, 1000000);
-	printf("after bps\n");
-	event_timer_add(tcp_timer, NULL, 0, 100000);
-	//event_timer_add(sender, NULL, 0, 13);
+	//event_timer_add(tcp_timer, NULL, 0, 100000);
+	//event_timer_add(sender, NULL, 0, 500000);
 	
 	uint32_t server_ip = 0xc0a86403;
 	uint16_t server_port = SERVER_PORT;
@@ -175,6 +171,7 @@ int main(int argc, char** argv) {
 		if(ni_has_input(ni)) {
 			process(ni);
 		}
+			
 		
 		if(flag && count == 0) {
 			int ret;
@@ -187,6 +184,16 @@ int main(int argc, char** argv) {
 		count++;
 		count = count % 2;
 		
+		/*
+		if(flag) {
+			int ret;
+			if((ret = tcp_send(socket, buffer, BUF_SIZE)) < 0) {
+				//printf("ret %d\n", ret);
+				ret = -ret;
+				err[ret]++;
+			}
+		}
+		*/
 		event_loop();
 	}
 	
