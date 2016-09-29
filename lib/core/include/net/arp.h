@@ -30,8 +30,6 @@ typedef struct _ARP {
 
 extern uint32_t ARP_TIMEOUT;		///< ARP timeout of ARP table
 
-
-
 /**
  * Process ARP packet.
  *
@@ -71,21 +69,6 @@ bool arp_announce(NetworkInterface* ni, uint32_t ip);
  * @return MAC address if there is entry in ARP table, if not 0xffffffffffff will be returned
  */
 uint64_t arp_get_mac(NetworkInterface* ni, uint32_t destination, uint32_t source);
-
-/**
- * Get MAC adress like arp_get_mac().
- * If there is no Mac address associated with IP address,
- * Register callback function.
- *
- * @param ni NI reference which manages ARP table
- * @param destination IP address
- * @param source IP address of interface
- * @param timeout callback's timeout
- * @param context callback's argument
- * @param func callback function
- * @return MAC address if there is entry in ARP table, if not 0xffffffffffff will be returned
- */
-uint64_t arp_get_mac_callback(NetworkInterface* ni, uint32_t destination, uint32_t source, uint64_t timeout, void* context, bool (*func)(void*));
 
 /**
  * Get IP address associated with MAC address from local ARP table.

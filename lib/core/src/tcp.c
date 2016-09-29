@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <gmalloc.h>
 #include <net/ni.h>
@@ -6,6 +7,7 @@
 #include <net/packet.h>
 
 #include <timer.h>
+#include <util/event.h>
 #include <net/interface.h>
 #include <net/ether.h>
 #include <net/ip.h>
@@ -53,6 +55,7 @@ typedef struct {
 	Packet* packet;
 } Segment;
 
+// TODO: need to think about struct padding. to minimize struct's size.
 typedef struct {
 	uint32_t sip;
 	uint16_t sport;
@@ -75,6 +78,10 @@ typedef struct {
 	uint32_t recv_wnd_max;
 	uint32_t last_ack;
 	NetworkInterface* ni;
+
+	bool delayed_ack_flag;
+	uint8_t syn_counter;
+	uint64_t delayed_ack_timeout;
 } TCB;
 
 typedef struct {
@@ -90,6 +97,9 @@ static List* conn_try_list;
 
 static Packet* packet_create(TCB* tcb, uint8_t flags, const void* data, int len);
 static bool packet_out(TCB* tcb, Packet* packet, uint16_t len); 
+bool unacked_segment_timer(void* context); 
+bool delayed_ack_timer(void* context); 
+bool tcp_try_connect(void* context); 
 
 static uint32_t tcp_init_seqnum() {
 	uint64_t time;
@@ -172,6 +182,9 @@ bool tcp_init() {
 
 		return false;
 	}
+	
+	event_timer_add(unacked_segment_timer, NULL, 0, 200000);
+	event_timer_add(delayed_ack_timer, NULL, 0, 100000);
 
 	return true;
 }
@@ -209,6 +222,9 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 	tcb->snd_wnd_max = 0;
 	tcb->snd_wnd_cur = 0;
 
+	tcb->delayed_ack_flag = false;
+	tcb->delayed_ack_timeout = 0;
+	tcb->syn_counter = 0;
 	// debug
 	debug_max = &(tcb->snd_wnd_max);
 	debug_cur = &(tcb->snd_wnd_cur);
@@ -244,35 +260,9 @@ static bool tcb_destroy(TCB* tcb) {
 	return true;
 }
 
-
-
 // TODO: maybe need routing func that finds src_ip from ni.
 static uint32_t route(NetworkInterface* ni, uint32_t dst_addr, uint16_t des_port) {
 	return ADDRESS;
-}
-
-bool tcp_try_connect(TCB* tcb) {
-	uint64_t mac = arp_get_mac(tcb->ni, tcb->dip, tcb->sip);
-	
-	if(mac != 0xffffffffffff) {
-		tcb->dmac = mac;
-		
-		if(!ni_output_available(tcb->ni))
-			return false;
-
-		Packet* packet = packet_create(tcb, SYN, NULL, 0);
-		if(!packet)
-			return false;
-
-		if(!packet_out(tcb, packet, 0))
-			return false;
-		
-		tcb->state = TCP_SYN_SENT;
-		tcb->sequence += 1;
-		return true;
-	}
-
-	return false;
 }
 
 uint32_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port, TCPCallback* tcp_callback, void* context) {
@@ -294,14 +284,9 @@ uint32_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port,
 	uint64_t mac = arp_get_mac(ni, tcb->dip, tcb->sip);
 
 	if(mac == 0xffffffffffff) {
-		Callback* callback = gmalloc(sizeof(Callback));
-		callback->tcb = tcb;
-		callback->timeout = timer_us() + 3 * 1000 * 1000;
-
-		if(!list_add(conn_try_list, (void*)callback))
-			return 0;	// error
+		event_timer_add(tcp_try_connect, tcb, 0, 100000);
 	} else {
-		if(!tcp_try_connect(tcb)) {
+		if(tcp_try_connect(tcb)) {
 			tcb_destroy(tcb);
 			
 			return 0;
@@ -346,14 +331,12 @@ int32_t tcp_send(uint32_t socket, void* data, const int32_t len) {
 	if(!packet)
 		return -4;
 
-	if(!packet_out(tcb, packet, len)) {
-		tcb->snd_wnd_cur -= len;
-
+	if(!packet_out(tcb, packet, len))
 		return -4;
-	}
 	
 	tcb->snd_wnd_cur += len;
 	tcb->sequence += len;
+	tcb->delayed_ack_flag = false;
 
 	return len;	
 }
@@ -407,6 +390,7 @@ bool tcp_process(Packet* packet) {
 					tcb->state = TCP_ESTABLISHED;
 					tcb->callback->connected(tcb_key, tcb->dip, tcb->dport, tcb->context);
 				}
+
 			} else if (tcp->rst == 1) {
 				//TODO: timeout
 				tcb->state = TCP_CLOSED;
@@ -478,19 +462,17 @@ bool tcp_process(Packet* packet) {
 				uint16_t len = endian16(ip->length) - ip->ihl * 4 - tcp->offset * 4;
 				if(len > 0 && tcb->acknowledgement == endian32(tcp->sequence)) {
 					tcb->acknowledgement += len;
-
-					//counter = !counter;
-					//if(counter) {
-					/*
+			
+					if(tcb->delayed_ack_flag) {
 						Packet* packet = packet_create(tcb, ACK, NULL, 0);
-						if(!packet)
-							printf("sending ack fail in est\n");
-
-						if(!packet_out(tcb, packet, 0))	//send ack
-							printf("send ack fail\n");
-							*/
-						// TODO : if packet_out is failed, maybe ack will never send again...
-				//	}
+						if(packet) {
+							if(packet_out(tcb, packet, 0))
+								tcb->delayed_ack_flag = false;
+						}
+					} else {
+						tcb->delayed_ack_timeout = timer_ms() + 100;	// 100ms
+						tcb->delayed_ack_flag = true;
+					}
 
 					tcb->callback->received(tcb_key, (uint8_t*)tcp + tcp->offset * 4, len, tcb->context);	// TODO: check last arg(context).
 				}
@@ -710,8 +692,11 @@ static Packet* packet_create(TCB* tcb, uint8_t flags, const void* data, int len)
 }
 
 static bool packet_out(TCB* tcb, Packet* packet, uint16_t len) {
-	NetworkInterface* ni = packet->ni;
+	if(!packet)
+		return false;
 
+	NetworkInterface* ni = packet->ni;
+	
 	if(len == 0)
 		return ni_output(ni, packet);
 
@@ -740,178 +725,107 @@ static bool packet_out(TCB* tcb, Packet* packet, uint16_t len) {
 	}
 }
 
-// TODO: function naming. and maybe need some modulization.
-//static bool packet_out(TCB* tcb, uint8_t flags, const void* data, int len) {
-//	NetworkInterface* ni = tcb->ni;
-//
-//	Packet* packet;
-//
-//	if(syn) {
-//		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + 4 + 4/* option */ + len);
-//	} else {
-//		packet = ni_alloc(ni, sizeof(Ether) + sizeof(IP) + sizeof(TCP) + len);
-//	}
-//	
-//	if(!packet)
-//		return false;
-//
-//	Ether* ether = (Ether*)(packet->buffer + packet->start);
-//	ether->dmac = endian48(arp_get_mac(ni,tcb->dip,tcb->sip));
-//	ether->smac = endian48(ni->mac);
-//	ether->type = endian16(ETHER_TYPE_IPv4);
-//	
-//	IP* ip = (IP*)ether->payload;
-//	ip->ihl = endian8(5);
-//	ip->version = endian8(4);
-//	ip->ecn = endian8(0); 
-//	ip->dscp = endian8(0);
-//
-//	ip_id = ip_get_id(ack);
-//	ip->id = endian16(ip_id);
-//	ip->flags_offset = 0x40;
-//	ip->ttl = endian8(IP_TTL);
-//	ip->protocol = endian8(IP_PROTOCOL_TCP);
-//	ip->source = endian32(tcb->sip);
-//	ip->destination = endian32(tcb->dip);
-//	
-//	TCP* tcp = (TCP*)ip->body;
-//	tcp->source = endian16(tcb->sport);
-//	tcp->destination = endian16(tcb->dport);
-//	tcp->sequence = endian32(tcb->sequence);
-//	tcp->acknowledgement = endian32(tcb->acknowledgement);
-//	tcp->ns = endian8(0);
-//	tcp->reserved = endian8(0);
-//	tcp->fin = flags & FIN; 
-//	tcp->syn = (flags & SYN) >> 1;
-//	tcp->rst = (flags & SYN) >> 2;
-//	tcp->psh = (flags & PSH) >> 3;
-//	tcp->ack = (flags & ACK) >> 4;
-//	tcp->urg = (flags & URG) >> 5;
-//	tcp->ece = (flags & ECE) >> 6;
-//	tcp->cwr = (flags & CWR) >> 7;
-//	tcp->window = endian16(tcb->recv_wnd_max);
-//	tcp->urgent = endian16(0);
-//	
-//	if(syn) {
-//		tcp->offset = endian8(7);
-//		uint32_t mss_option = endian32(0x020405b4);
-//		uint32_t win_option = endian32(0x01030307);
-//
-//		memcpy(tcp->payload, &mss_option, 4);
-//		memcpy((uint8_t*)(tcp->payload) + 4, &win_option, 4);
-//
-//		tcp_pack(packet, len + 4 + 4);
-//	} else {
-//		tcp->offset = endian8(5);
-//		memcpy((uint8_t*)tcp + tcp->offset * 4, data, len);
-//
-//		tcp_pack(packet, len);
-//	}
-//
-//	//printf("packet out!!\n");
-//	if(ni_output_available(ni)) {
-//		//printf("send fail\n");
-//		if(ni_output(ni, packet)) {
-//
-//			if(len != 0) {
-//				Segment* segment = gmalloc(sizeof(Segment));
-//				if(!segment)
-//					printf("seg malloc error\n");
-//
-//				segment->sequence = tcb->sequence;
-//				segment->syn = endian8(syn);
-//				segment->ack = endian8(ack);
-//				segment->psh = endian8(psh);
-//				segment->fin = endian8(fin);
-//				segment->len = len;
-//				segment->data = gmalloc(len);
-//				if(!(segment->data))
-//					printf("data mallco error\n");
-//
-//				segment->timeout = timer_us() + ACK_TIMEOUT;
-//
-//				memcpy(segment->data, data, len);
-//				if(!list_add(tcb->unack_list, segment))
-//					printf("list add fail\n");
-//			}
-//			
-//			tcb->sequence += len;
-//			return true;
-//		} else {
-//			ni_free(packet);
-//			return false;
-//		}
-//	} else {
-//		ni_free(packet);
-//		return false;
-//	}
-//}
+bool unacked_segment_timer(void* context) {
+	uint64_t current = timer_ms();
 
-/*
- * iterate tcbs and it's seg unacked list. compare timeout. if timeout is over, resend segment.
- * 
- */
-bool tcp_timer(void* context) {
-	uint64_t current = timer_us();
+	if(!tcbs) 
+		return true;
 
-	/*
-	if(tcbs) {
-		MapIterator map_iter;
-		map_iterator_init(&map_iter, tcbs);
+	MapIterator map_iter;
+	map_iterator_init(&map_iter, tcbs);
 
-		while(map_iterator_has_next(&map_iter)) {
-			MapEntry* entry = map_iterator_next(&map_iter); 
-			TCB* tcb = entry->data;
+	while(map_iterator_has_next(&map_iter)) {
+		MapEntry* entry = map_iterator_next(&map_iter);
+		TCB* tcb = entry->data;
 
-			if(!tcb->unack_list) 
-				continue;
+		if(!tcb->unack_list)
+			continue;
 
-			ListIterator seg_iter;
-			list_iterator_init(&seg_iter, tcb->unack_list);
+		ListIterator seg_iter;
+		list_iterator_init(&seg_iter, tcb->unack_list);
 
-			while(list_iterator_has_next(&seg_iter)) {
-				Segment* segment = (Segment*)list_iterator_next(&seg_iter);
-				if(segment->timeout < current) {
-					// need to resend segment (packet_out())
-					
-				}
-			}
-		}
-	}
-	*/
+		while(list_iterator_has_next(&seg_iter)) {
+			Segment* segment = (Segment*)list_iterator_next(&seg_iter);
 
-	if(time_wait_list) {
-		ListIterator iter;
-		list_iterator_init(&iter, time_wait_list);
-		while(list_iterator_has_next(&iter)) {
-			TCB* tcb = list_iterator_next(&iter);
-			printf("timeout : %d, cur : %d\n", tcb->timeout, current);
-			if(tcb->timeout < current) {
-				tcb->state = TCP_CLOSED;
-				tcb_destroy(tcb);
-			list_iterator_remove(&iter);
-			}
-		}
-	}
+			if(segment->timeout > current) // TODO:need to concern about timeout overflow
+				break;
 
-	if(conn_try_list) {
-		ListIterator iter;
-		list_iterator_init(&iter, conn_try_list);
-		while(list_iterator_has_next(&iter)) {
-			Callback* callback = list_iterator_next(&iter);
-			
-			if(callback->timeout < current) {
-				list_iterator_remove(&iter);
-				callback->tcb->state = TCP_CLOSED;
-				tcb_destroy(callback->tcb);
-			} else {
-				if(tcp_try_connect(callback->tcb)) 
-					list_iterator_remove(&iter);	
-			}
+			if(packet_out(tcb, segment->packet, segment->len)) //should change ack when retransmit?
+				list_iterator_remove(&seg_iter);
 		}
 	}
 
 	return true;
+}
+
+bool delayed_ack_timer(void* context) {
+	uint64_t current = timer_ms();
+
+	if(!tcbs)
+		return true;
+
+	MapIterator map_iter;
+	map_iterator_init(&map_iter, tcbs);
+
+	while(map_iterator_has_next(&map_iter)) {
+		MapEntry* entry = map_iterator_next(&map_iter);
+		TCB* tcb = entry->data;
+
+		if(tcb->delayed_ack_flag && current > tcb->delayed_ack_timeout) {
+			Packet* packet = packet_create(tcb, ACK, NULL, 0);
+			if(!packet)
+				continue;
+
+			if(!packet_out(tcb, packet, 0))
+				continue;
+
+			tcb->delayed_ack_flag = false;
+		}
+	}
+
+	return true;
+}
+
+bool tcp_try_connect(void* context) {
+	TCB* tcb = (TCB*)context;
+	uint64_t mac = arp_get_mac(tcb->ni, tcb->dip, tcb->sip);
+	
+	if(tcb->syn_counter++ == 3) {
+		tcb->state = TCP_CLOSED;
+		tcb_destroy(tcb);
+
+		return false;
+	}
+
+	if(mac != 0xffffffffffff) {
+		tcb->dmac = mac;
+
+		if(!ni_output_available(tcb->ni))
+			return true;
+
+		Packet* packet = packet_create(tcb, SYN, NULL, 0);
+		if(!packet)
+			return true;
+
+		if(!packet_out(tcb, packet, 0))
+			return true;
+
+		tcb->state = TCP_SYN_SENT;
+		tcb->sequence += 1;
+
+		return false;
+	}
+
+	return true;
+}
+
+bool time_wait_timer(void* context) {
+	TCB* tcb = (TCB*)context;
+
+	tcb->state = TCP_CLOSED;
+	tcb_destroy(tcb);
+
+	return false;
 }
 
 bool tcp_port_alloc0(NetworkInterface* ni, uint32_t addr, uint16_t port) {
