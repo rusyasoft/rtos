@@ -13,12 +13,15 @@ all: $(OBJS)
 obj/%.o: src/%.c
 	mkdir -p $(DIR)
 	gcc $(CFLAGS) -c -o $@ $<
-	gcc -o test test.c -lpthread
+	gcc -o server server.c -lpthread
+	gcc -o client client.c -lpthread
 
 clean:
 	rm -rf obj
 	rm -f tcp
 	rm -f main
+	rm -f server
+	rm -f client
 
 run: all
 	../../bin/console script

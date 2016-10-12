@@ -16,7 +16,7 @@
 
 #define address 0xc0a8640a
 #define BUF_SIZE 1460
-#define SERVER_PORT 9004
+#define SERVER_PORT 9003
 
 extern uint32_t count2;
 uint64_t total_rcv;
@@ -28,9 +28,9 @@ uint8_t buffer[BUF_SIZE +1];
 
 bool bps_checker(void* context) {
 	//printf("%u bps\n", total_rcv * 8);
-	
 	printf("%u bps, %u, %u, %u, %u, %u, %u, %u\n", total_rcv * 8, *debug_max, *debug_cur,  err[1], err[2], err[3], err[4], err[5]);
 	err[2] = 0;
+	err[3] = 0;
 	err[5] = 0;
 	
 	total_rcv = 0;
@@ -50,20 +50,20 @@ bool sender(void* context) {
 	return true;
 }
 
-static int my_connected(uint64_t socket, uint32_t addr, uint16_t port, void* context) {
+int my_connected(uint64_t socket, uint32_t addr, uint16_t port, void* context) {
 	printf("connected\n");
 	flag = true;
 
 	return 1;
 }
 
-static int my_received(uint64_t socket, const void* buf, size_t len, void* context) {
+int my_received(uint64_t socket, const void* buf, size_t len, void* context) {
 	total_rcv += len;
 
 	return 1;
 }
 
-static int my_sent(uint64_t socket, const void* buf, size_t len, void* context) {
+int my_sent(uint64_t socket, const void* buf, size_t len, void* context) {
 	//printf("sent %s\n", buf);
 	
 	return 1;
@@ -90,8 +90,6 @@ void ginit(int argc, char** argv) {
 	}
 	tcp_init();
 	event_timer_add(bps_checker, NULL, 0, 1000000);
-	//event_timer_add(tcp_timer, NULL, 0, 100000);
-	//event_timer_add(sender, NULL, 0, 500000);
 	
 	uint32_t server_ip = 0xc0a86403;
 	uint16_t server_port = SERVER_PORT;
@@ -164,7 +162,8 @@ int main(int argc, char** argv) {
 	
 	thread_barrior();
 	
-	uint8_t count = 0;
+//	uint8_t snd_count = 0;
+//	uint8_t count = 0;
 	NetworkInterface* ni = ni_get(0);
 
 	while(1) {
@@ -172,7 +171,7 @@ int main(int argc, char** argv) {
 			process(ni);
 		}
 			
-		
+		/*
 		if(flag && count == 0) {
 			int ret;
 			if((ret = tcp_send(socket, buffer, BUF_SIZE)) < 0) {
@@ -183,17 +182,18 @@ int main(int argc, char** argv) {
 		}
 		count++;
 		count = count % 2;
+		*/
 		
-		/*
-		if(flag) {
+		if(flag/* && snd_count < 21*/) {
 			int ret;
 			if((ret = tcp_send(socket, buffer, BUF_SIZE)) < 0) {
 				//printf("ret %d\n", ret);
 				ret = -ret;
 				err[ret]++;
 			}
+			//snd_count++;
 		}
-		*/
+		
 		event_loop();
 	}
 	
