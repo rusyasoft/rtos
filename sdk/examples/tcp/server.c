@@ -18,7 +18,7 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *bps_checker(void* arg) {
 	while(1) {
-		printf("snd : %u, rcv : %u bps\n", snd_data * 8, rcv_data * 8);
+		printf("snd : %lu, rcv : %lu bps\n", snd_data * 8, rcv_data * 8);
 		pthread_mutex_lock(&lock);
 		snd_data = 0;
 		rcv_data = 0;

@@ -10,7 +10,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-#define BUF_LEN 1000//1460
+#define BUF_LEN 1460
 
 int sock;
 unsigned int total;
@@ -42,7 +42,6 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in serv_addr;
 	char buffer[BUF_LEN + 1];
 	int str_len;
-	int count = 100000;
 
 	pthread_t thread1;
 	pthread_t thread2;
@@ -77,11 +76,7 @@ int main(int argc, char *argv[]) {
 	memset(buffer, 0xaa, BUF_LEN);
 
 	while(1) {
-		count--;
-		if(count == 0)
-			break;
-
-	//	usleep(100);
+		//usleep(1000);
 		write(sock, buffer, BUF_LEN);
 	//	send(sock, buffer, BUF_LEN, 0);
 		

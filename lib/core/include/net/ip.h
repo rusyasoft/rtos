@@ -44,6 +44,8 @@ typedef struct _IP {
 	uint8_t		body[0];	///< IP body payload
 } __attribute__ ((packed)) IP;
 
+//uint32_t ip_alloc(NIC* nic);
+
 /**
  * Set IP length, TTL, checksum, and Packet->end index
  *
