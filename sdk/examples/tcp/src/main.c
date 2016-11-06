@@ -107,12 +107,14 @@ void ginit(int argc, char** argv) {
 	tcp_connected(socket, my_connected);
 	tcp_sent(socket, my_sent);
 	tcp_received(socket, my_received);	
-
+	
+	/*
 	socket2 = tcp_connect(ni, server_ip, server_port);
 	printf("socket2 : %lu\n", socket2);
 	tcp_connected(socket2, my_connected);
 	tcp_sent(socket2, my_sent);
 	tcp_received(socket2, my_received2);	
+	*/
 }
 		
 void init(int argc, char** argv) {
@@ -170,10 +172,12 @@ int main(int argc, char** argv) {
 			ret = -ret;
 			err[ret]++;
 		}
+		/*
 		if((ret = tcp_send(socket2, buffer, BUF_SIZE)) < 0) {
 			ret = -ret;
 			err2[ret]++;
 		}
+		*/
 		
 		event_loop();
 	}

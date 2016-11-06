@@ -40,11 +40,11 @@
 #define ECE	0x40
 #define CWR	0x80
 
-#define RECV_WND_MAX	1280//4000
+#define RECV_WND_MAX	163840//4000
 #define ACK_TIMEOUT	2000000	// 2 sec
 #define MSL		10000000	// 10 sec 
-#define SCALE		128
-#define SMSS		1460	//Sender's Maximum Segment Size
+#define RECV_WND_SCALE	128	
+#define RECV_MSS		1460	//Sender's Maximum Segment Size
  
 typedef struct {
 	uint32_t sequence;
@@ -78,8 +78,13 @@ typedef struct {
 	Map* rcv_buffer;
 	int32_t snd_wnd_max;
 	int32_t snd_wnd_cur;
+	uint16_t snd_mss;
+	uint8_t snd_wnd_scale;
+
 	uint32_t recv_wnd_max;
 	uint32_t last_ack;
+	uint16_t recv_mss;
+	uint8_t recv_wnd_scale;
 	NetworkInterface* ni;
 
 	bool delayed_ack_flag;
@@ -269,6 +274,17 @@ static uint64_t tcb_key_create(uint32_t sip, uint16_t sport) {
 	return tcb_key;
 }
 
+static uint8_t wnd_scale_get(uint32_t recv_wnd_max) {
+	uint8_t scale = 0;
+
+	while(recv_wnd_max > 0xffff) {
+		recv_wnd_max >>= 1;
+		scale++;
+	}
+
+	return scale;
+}
+
 static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_t dport) {
 	TCB* tcb = (TCB*)gmalloc(sizeof(TCB));
 	if(tcb == NULL) {
@@ -306,6 +322,8 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 	tcb->acknowledgement = 0;
 	
 	tcb->recv_wnd_max = RECV_WND_MAX;
+	tcb->recv_wnd_scale = wnd_scale_get(tcb->recv_wnd_max);
+		
 	tcb->snd_wnd_max = 0;
 	tcb->snd_wnd_cur = 0;
 
@@ -495,6 +513,34 @@ bool tcp_process(Packet* packet) {
 				tcb->snd_wnd_max = endian16(tcp->window);
 				tcb->snd_wnd_cur = 0;
 				
+				if(tcp->offset > 5) {
+					uint8_t* option = (uint8_t*)tcp->payload;
+					uint8_t* data = (uint8_t*)((uint32_t*)tcp + tcp->offset);
+
+					while(option < data) {
+						switch(*option) {
+							case 0:
+								option++;
+								break;
+							case 1:
+								option++;
+								break;
+							case 2:
+								option += 2;
+								tcb->snd_mss = endian16(*(uint16_t*)option);
+								option += 2;
+								break;
+							case 3:
+								option += 2;
+								tcb->snd_wnd_scale = 1 << *option;
+								option++;
+								break;
+							default:
+								option += *(option + 1);
+								break;
+						}
+					}
+				}
 				Packet* packet = packet_create(tcb, ACK, NULL, 0);
 				if(!packet) {
 					return false;
@@ -504,12 +550,12 @@ bool tcp_process(Packet* packet) {
 					return false;
 				}
 				
-				if(SMSS > 2190)
-					tcb->cwnd = 2 * SMSS;
-				else if(1095 < SMSS && SMSS <= 2190)
-					tcb->cwnd = 3 * SMSS;
-				else if(0 < SMSS && SMSS <= 1095)
-					tcb->cwnd = 4 * SMSS;
+				if(RECV_MSS > 2190)
+					tcb->cwnd = 2 * RECV_MSS;
+				else if(1095 < RECV_MSS && RECV_MSS <= 2190)
+					tcb->cwnd = 3 * RECV_MSS;
+				else if(0 < RECV_MSS && RECV_MSS <= 1095)
+					tcb->cwnd = 4 * RECV_MSS;
 				
 				tcb->ssthresh = 65535;
 				tcb->state = TCP_ESTABLISHED;
@@ -529,23 +575,23 @@ bool tcp_process(Packet* packet) {
 			if(tcp->ack == 1) {
 				uint32_t tmp_ack = endian32(tcp->acknowledgement);
 
-				tcb->snd_wnd_max = endian16(tcp->window) * SCALE;	//TODO: need some condition
+				tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;	//TODO: need some condition
 
 				uint32_t acked_size = tmp_ack - tcb->last_ack;
 
 				if(tcb->last_ack <= tcb->sequence) {
 					if(tcb->last_ack < tmp_ack && tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 			
 						if(tcb->cwnd < tcb->ssthresh) {	//slow start
-							if(acked_size >= SMSS)
-								tcb->cwnd += SMSS; 
+							if(acked_size >= RECV_MSS)
+								tcb->cwnd += RECV_MSS; 
 							else
 								tcb->cwnd += acked_size; 
 						} else {	//congestion avoidance
-							tcb->cwnd += (SMSS * SMSS) / tcb->cwnd;
+							tcb->cwnd += (RECV_MSS * RECV_MSS) / tcb->cwnd;
 						}
 
 						tcb->last_ack = tmp_ack;
@@ -570,17 +616,17 @@ bool tcp_process(Packet* packet) {
 					}
 				} else {
 					if(tcb->last_ack < tmp_ack || tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 
 						if(tcb->cwnd < tcb->ssthresh) {	//slow start
-							if(acked_size >= SMSS)
-								tcb->cwnd += SMSS; 
+							if(acked_size >= RECV_MSS)
+								tcb->cwnd += RECV_MSS; 
 							else
 								tcb->cwnd += acked_size; 
 						} else {	//congestion avoidance
-							tcb->cwnd += (SMSS * SMSS) / tcb->cwnd;
+							tcb->cwnd += (RECV_MSS * RECV_MSS) / tcb->cwnd;
 						}
 
 						tcb->last_ack = tmp_ack;
@@ -645,7 +691,7 @@ bool tcp_process(Packet* packet) {
 
 						gfree(tmp_ip);
 					}
-				} else if(endian32(tcp->sequence) - tcb->acknowledgement <= RECV_WND_MAX * SCALE) {
+				} else if(endian32(tcp->sequence) - tcb->acknowledgement <= RECV_WND_MAX * tcb->recv_wnd_scale) {
 					// buffering out of order packet.
 					Packet* tmp_packet = packet_create(tcb, ACK, NULL, 0);
 
@@ -675,11 +721,11 @@ bool tcp_process(Packet* packet) {
 			} else if(tcp->ack) {
 				uint32_t tmp_ack = endian32(tcp->acknowledgement);
 
-				tcb->snd_wnd_max = endian16(tcp->window) * SCALE;	//TODO: need some condition
+				tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;	//TODO: need some condition
 
 				if(tcb->last_ack <= tcb->sequence) {
 					if(tcb->last_ack < tmp_ack && tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 
@@ -705,7 +751,7 @@ bool tcp_process(Packet* packet) {
 					}
 				} else {
 					if(tcb->last_ack < tmp_ack || tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 
@@ -758,11 +804,11 @@ bool tcp_process(Packet* packet) {
 			if(tcp->ack) {
 				uint32_t tmp_ack = endian32(tcp->acknowledgement);
 
-				tcb->snd_wnd_max = endian16(tcp->window) * SCALE;	//TODO: need some condition
+				tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;	//TODO: need some condition
 
 				if(tcb->last_ack <= tcb->sequence) {
 					if(tcb->last_ack < tmp_ack && tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wrd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 
@@ -788,7 +834,7 @@ bool tcp_process(Packet* packet) {
 					}
 				} else {
 					if(tcb->last_ack < tmp_ack || tmp_ack <= tcb->sequence) {
-						//tcb->snd_wnd_max = endian16(tcp->window) * SCALE;
+						//tcb->snd_wnd_max = endian16(tcp->window) * tcb->snd_wnd_scale;
 						ListIterator iter;
 						list_iterator_init(&iter, tcb->unack_list);
 
@@ -911,8 +957,9 @@ static Packet* packet_create(TCB* tcb, uint8_t flags, const void* data, int len)
 	
 	if(tcp->syn) {
 		tcp->offset = endian8(7);
-		uint32_t mss_option = endian32(0x020405b4);
-		uint32_t win_option = endian32(0x01030307);
+		//uint32_t mss_option = endian32(0x020405b4);
+		uint32_t mss_option = endian32(0x02040578);
+		uint32_t win_option = endian32(0x01030300 + tcb->recv_wnd_scale);
 
 		memcpy(tcp->payload, &mss_option, 4);
 		memcpy((uint8_t*)(tcp->payload) + 4, &win_option, 4);
@@ -1049,12 +1096,12 @@ static bool unacked_segment_timer(void* context) {
 
 			// retransmission
 			if(packet_out(tcb, segment->packet, segment->len)) {
-				if(tcb->snd_wnd_cur / 2 > 2 * SMSS)
+				if(tcb->snd_wnd_cur / 2 > 2 * RECV_MSS)
 					tcb->ssthresh = tcb->snd_wnd_cur;
 				else
-					tcb->ssthresh = 2 * SMSS;
+					tcb->ssthresh = 2 * RECV_MSS;
 
-				tcb->cwnd = SMSS;
+				tcb->cwnd = RECV_MSS;
 
 				list_iterator_remove(&seg_iter);
 			}
