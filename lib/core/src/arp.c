@@ -17,7 +17,7 @@ typedef struct {
 	uint64_t	timeout;
 } ARPEntity;
 
-uint32_t ARP_TIMEOUT = 14400 * 1000 * 1000;	// 4 hours
+uint32_t ARP_TIMEOUT = 14400L * 1000L * 1000L;	// 4 hours
 
 bool arp_process(Packet* packet) {
 	extern uint64_t __timer_ms;

@@ -14,9 +14,9 @@
 #include <unistd.h>
 #include <readline.h>
 
-#define address 0xc0a8640a
+#define address 0xc0a8640b
 #define BUF_SIZE 1460
-#define SERVER_PORT 9004
+#define SERVER_PORT 9005
 
 extern uint32_t count2;
 uint64_t total_rcv;
@@ -35,14 +35,14 @@ bool bps_checker(void* context) {
 	err[5] = 0;
 	
 	total_rcv = 0;
-
+/*
 	printf("%u bps, %u, %u, %u, %u, %u\n", total_rcv2 * 8, err2[1], err2[2], err2[3], err2[4], err2[5]);
 	err2[2] = 0;
 	err2[3] = 0;
 	err2[5] = 0;
 	
 	total_rcv2 = 0;
-
+*/
 	return true;
 }
 
@@ -52,13 +52,13 @@ int32_t my_connected(uint64_t socket, uint32_t addr, uint16_t port, void* contex
 	return 1;
 }
 
-int32_t my_received(uint64_t socket, const void* buf, size_t len, void* context) {
+int32_t my_received(uint64_t socket, void* buf, size_t len, void* context) {
 	total_rcv += len;
 
 	return 1;
 }
 
-int32_t my_received2(uint64_t socket, const void* buf, size_t len, void* context) {
+int32_t my_received2(uint64_t socket, void* buf, size_t len, void* context) {
 	total_rcv2 += len;
 
 	return 1;
@@ -160,6 +160,7 @@ int main(int argc, char** argv) {
 	
 	thread_barrior();
 	
+	printf("test!!\n");
 	NetworkInterface* ni = ni_get(0);
 
 	while(1) {

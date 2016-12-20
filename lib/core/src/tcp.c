@@ -46,6 +46,8 @@
 #define RECV_WND_SCALE	128	
 #define RECV_MSS		1460	//Sender's Maximum Segment Size
  
+extern void* __gmalloc_pool;
+
 typedef struct {
 	uint32_t sequence;
 	uint32_t len;
@@ -199,7 +201,7 @@ static uint32_t ip_get_id(int ack) {
 	return	ip_id;
 }
 
-TCB* tcb_get(uint64_t tcb_key) {
+static TCB* tcb_get(uint64_t tcb_key) {
 	TCB* tcb = map_get(tcbs, (void*)(uintptr_t)tcb_key);
 
 	if(tcb == NULL) {
@@ -229,14 +231,14 @@ static uint64_t map_jenkins_hash(void* arg_key) {
 }
 
 bool tcp_init() {
-	tcbs = map_create(20, map_jenkins_hash, map_uint64_equals, NULL);
+	tcbs = map_create(100000, map_jenkins_hash, map_uint64_equals, __gmalloc_pool);
 	if(!tcbs) {
 		printf("tcbs create fail\n");
 
 		return false;
 	}
 	
-	time_wait_list = list_create(NULL);
+	time_wait_list = list_create(__gmalloc_pool);
 	if(!time_wait_list) {
 		printf("time_wait_list create fail\n");
 		
@@ -245,7 +247,7 @@ bool tcp_init() {
 		return false;
 	}
 
-	conn_try_list = list_create(NULL);
+	conn_try_list = list_create(__gmalloc_pool);
 	if(!conn_try_list) {
 		printf("conn_try_list create fail\n");
 		
@@ -292,14 +294,14 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 		return NULL;
 	}
 	
-	tcb->unack_list = list_create(NULL);
+	tcb->unack_list = list_create(__gmalloc_pool);
 	if(tcb->unack_list == NULL) {
 		printf("list_create error\n");
 		gfree(tcb);
 		return NULL;
 	}
 
-	tcb->rcv_buffer = map_create(50, map_uint64_hash, map_uint64_equals, NULL);
+	tcb->rcv_buffer = map_create(50, map_uint64_hash, map_uint64_equals, __gmalloc_pool);
 	if(!tcbs) {
 		printf("tcbs create fail\n");
 		gfree(tcb);
@@ -308,6 +310,8 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 
 	tcb->sip = sip; 
 	tcb->sport = tcp_port_alloc(ni, sip);
+
+	//printf("port : %u\n", tcb->sport);
 	if(tcb->sport == 0) {
 		printf("sport alloc fail\n");
 		gfree(tcb);
@@ -326,6 +330,7 @@ static TCB* tcb_create(NetworkInterface* ni, uint32_t sip, uint32_t dip, uint16_
 		
 	tcb->snd_wnd_max = 0;
 	tcb->snd_wnd_cur = 0;
+	tcb->snd_wnd_scale = 1;
 
 	tcb->context = NULL;
 	tcb->connected = NULL;
@@ -374,7 +379,26 @@ static bool tcb_destroy(TCB* tcb) {
 
 // TODO: maybe need routing func that finds src_ip from ni.
 static uint32_t route(NetworkInterface* ni, uint32_t dst_addr, uint16_t des_port) {
-	return ADDRESS;
+	IPv4Interface* interface = NULL;
+	uint32_t ip = 0;
+
+	Map* interfaces = ni_config_get(ni, NI_ADDR_IPv4);
+	if(!interfaces)
+		return 0;
+
+	MapIterator iter;
+	map_iterator_init(&iter, interfaces);
+	while(map_iterator_has_next(&iter)) {
+		MapEntry* entry = map_iterator_next(&iter);
+		interface = entry->data;
+		ip = (uint32_t)(uint64_t)entry->key;
+		break;
+	}
+	
+	if(!interface)
+		return 0;
+
+	return ip;
 }
 
 uint64_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port) {
@@ -387,7 +411,7 @@ uint64_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port)
 	}
 
 	uint64_t tcb_key = tcb_key_create(endian32(tcb->sip), endian16(tcb->sport));	
-	printf("key : %u\n", tcb_key);
+	//printf("key : %u\n", tcb_key);
 
 	if(!map_put(tcbs, (void*)tcb_key, (void*)(uintptr_t) tcb)) {
 		printf("map_put error\n");
@@ -429,7 +453,7 @@ bool tcp_close(uint64_t socket) {
 	return true;
 }
 
-int32_t tcp_send(uint64_t socket, void* data, const int32_t len) {
+int32_t tcp_send(uint64_t socket, void* data, const uint16_t len) {
 	if(len == 0)
 		return 0;
 
@@ -437,15 +461,21 @@ int32_t tcp_send(uint64_t socket, void* data, const int32_t len) {
 	if(!tcb)
 		return -1;
 
-	if(tcb->state != TCP_ESTABLISHED)
-		return -1;	
-
+	if(tcb->state != TCP_ESTABLISHED) {
+		//return -1;	
+		return -2;
+	}
+	
 	if(tcb->snd_wnd_max < tcb->cwnd) {
-		if(tcb->snd_wnd_max - tcb->snd_wnd_cur < len)
-			return -2;
+		if(tcb->snd_wnd_max - tcb->snd_wnd_cur < len) {
+			//printf("port:%u, swm:%u, swc:%u, cwnd:%u\n", tcb->sport, tcb->snd_wnd_max, tcb->snd_wnd_cur, tcb->cwnd);
+			//return -2;
+			return -3;
+		}
 	} else {
 		if(tcb->cwnd - tcb->snd_wnd_cur < len)
-			return -2;
+	//		return -2;
+			return 0;
 	}
 
 	if(!ni_output_available(tcb->ni))
@@ -505,7 +535,7 @@ bool tcp_process(Packet* packet) {
 			break; 
 
 		case TCP_SYN_SENT:
-			printf("proc syn_sent\n");
+			//printf("proc syn_sent\n");
 			if(tcp->syn == 1 && tcp->ack == 1) {
 				tcb->acknowledgement = endian32(tcp->sequence) + 1;
 				tcb->last_ack = endian32(tcp->ack);
@@ -529,6 +559,9 @@ bool tcp_process(Packet* packet) {
 								option += 2;
 								tcb->snd_mss = endian16(*(uint16_t*)option);
 								option += 2;
+								
+								if(tcb->snd_mss > 1460)	// cause our driver doesn't have TSO.
+									tcb->snd_mss = 1460;
 								break;
 							case 3:
 								option += 2;
@@ -541,6 +574,7 @@ bool tcp_process(Packet* packet) {
 						}
 					}
 				}
+
 				Packet* packet = packet_create(tcb, ACK, NULL, 0);
 				if(!packet) {
 					return false;
@@ -550,12 +584,12 @@ bool tcp_process(Packet* packet) {
 					return false;
 				}
 				
-				if(RECV_MSS > 2190)
-					tcb->cwnd = 2 * RECV_MSS;
-				else if(1095 < RECV_MSS && RECV_MSS <= 2190)
-					tcb->cwnd = 3 * RECV_MSS;
-				else if(0 < RECV_MSS && RECV_MSS <= 1095)
-					tcb->cwnd = 4 * RECV_MSS;
+				if(tcb->snd_mss > 2190)
+					tcb->cwnd = 2 * tcb->snd_mss;
+				else if(1095 < tcb->snd_mss && tcb->snd_mss <= 2190)
+					tcb->cwnd = 3 * tcb->snd_mss;
+				else if(0 < tcb->snd_mss && tcb->snd_mss <= 1095)
+					tcb->cwnd = 4 * tcb->snd_mss;
 				
 				tcb->ssthresh = 65535;
 				tcb->state = TCP_ESTABLISHED;
@@ -586,12 +620,12 @@ bool tcp_process(Packet* packet) {
 						list_iterator_init(&iter, tcb->unack_list);
 			
 						if(tcb->cwnd < tcb->ssthresh) {	//slow start
-							if(acked_size >= RECV_MSS)
-								tcb->cwnd += RECV_MSS; 
+							if(acked_size >= tcb->snd_mss)
+								tcb->cwnd += tcb->snd_mss; 
 							else
 								tcb->cwnd += acked_size; 
 						} else {	//congestion avoidance
-							tcb->cwnd += (RECV_MSS * RECV_MSS) / tcb->cwnd;
+							tcb->cwnd += (tcb->snd_mss * tcb->snd_mss) / tcb->cwnd;
 						}
 
 						tcb->last_ack = tmp_ack;
@@ -602,7 +636,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 
@@ -621,12 +656,12 @@ bool tcp_process(Packet* packet) {
 						list_iterator_init(&iter, tcb->unack_list);
 
 						if(tcb->cwnd < tcb->ssthresh) {	//slow start
-							if(acked_size >= RECV_MSS)
-								tcb->cwnd += RECV_MSS; 
+							if(acked_size >= tcb->snd_mss)
+								tcb->cwnd += tcb->snd_mss; 
 							else
 								tcb->cwnd += acked_size; 
 						} else {	//congestion avoidance
-							tcb->cwnd += (RECV_MSS * RECV_MSS) / tcb->cwnd;
+							tcb->cwnd += (tcb->snd_mss * tcb->snd_mss) / tcb->cwnd;
 						}
 
 						tcb->last_ack = tmp_ack;
@@ -637,7 +672,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 
@@ -691,7 +727,7 @@ bool tcp_process(Packet* packet) {
 
 						gfree(tmp_ip);
 					}
-				} else if(endian32(tcp->sequence) - tcb->acknowledgement <= RECV_WND_MAX * tcb->recv_wnd_scale) {
+				} else if(endian32(tcp->sequence) - tcb->acknowledgement <= tcb->recv_wnd_max) {
 					// buffering out of order packet.
 					Packet* tmp_packet = packet_create(tcb, ACK, NULL, 0);
 
@@ -737,7 +773,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 
@@ -763,7 +800,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 
@@ -820,7 +858,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 
@@ -846,7 +885,8 @@ bool tcp_process(Packet* packet) {
 							list_iterator_remove(&iter);
 							tcb->snd_wnd_cur -= seg->len;
 
-							tcb->sent(tcb_key, seg->len, tcb->context);
+							if(tcb->sent)
+								tcb->sent(tcb_key, seg->len, tcb->context);
 
 							ni_free(seg->packet);
 

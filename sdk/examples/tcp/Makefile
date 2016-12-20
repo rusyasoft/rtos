@@ -15,6 +15,7 @@ obj/%.o: src/%.c
 	gcc $(CFLAGS) -c -o $@ $<
 	gcc -o server server.c -lpthread
 	gcc -o client client.c -lpthread
+	gcc -o mul_server multi_server.c -lpthread
 
 clean:
 	rm -rf obj
@@ -22,6 +23,7 @@ clean:
 	rm -f main
 	rm -f server
 	rm -f client
+	rm -f mul_server
 
 run: all
 	../../bin/console script
