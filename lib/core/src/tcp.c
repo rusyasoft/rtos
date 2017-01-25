@@ -16,7 +16,6 @@
 #include <util/map.h>
 
 #define MAX_SEQNUM	2147483648
-#define ADDRESS 0xc0a8640a	// only for develop version
 
 #define TCP_CLOSED		0	
 #define TCP_LISTEN 		1
@@ -41,7 +40,7 @@
 #define CWR	0x80
 
 #define RECV_WND_MAX	163840//4000
-#define ACK_TIMEOUT	2000000	// 2 sec
+#define ACK_TIMEOUT	2000	// 2 sec
 #define MSL		10000000	// 10 sec 
 #define RECV_WND_SCALE	128	
 #define RECV_MSS		1460	//Sender's Maximum Segment Size
@@ -231,7 +230,7 @@ static uint64_t map_jenkins_hash(void* arg_key) {
 }
 
 bool tcp_init() {
-	tcbs = map_create(100000, map_jenkins_hash, map_uint64_equals, __gmalloc_pool);
+	tcbs = map_create(20, map_jenkins_hash, map_uint64_equals, __gmalloc_pool);
 	if(!tcbs) {
 		printf("tcbs create fail\n");
 
@@ -482,6 +481,7 @@ int32_t tcp_send(uint64_t socket, void* data, const uint16_t len) {
 		return -3;
 	
 	// debug
+	/*
 	if(tcb->snd_wnd_max < tcb->cwnd) {
 		memcpy(data, &(tcb->snd_wnd_max), 4);
 		memcpy((int32_t*)data + 1, &(tcb->snd_wnd_cur), 4);
@@ -489,6 +489,7 @@ int32_t tcp_send(uint64_t socket, void* data, const uint16_t len) {
 		memcpy(data, &(tcb->cwnd), 4);
 		memcpy((int32_t*)data + 1, &(tcb->cwnd), 4);
 	}
+	*/
 
 	Packet* packet = packet_create(tcb, ACK | PSH, data, len);
 	if(!packet)
@@ -1038,6 +1039,9 @@ static bool packet_out(TCB* tcb, Packet* packet, uint16_t len) {
 
 		if(!list_add(tcb->unack_list, segment)) {
 			printf("list add fail\n");	//could be wrong
+			
+			gfree(segment);
+			ni_free(packet);
 			return false;
 		}
 
@@ -1143,7 +1147,11 @@ static bool unacked_segment_timer(void* context) {
 
 				tcb->cwnd = RECV_MSS;
 
+				gfree(segment);
+
 				list_iterator_remove(&seg_iter);
+
+				printf("retrans!\n");
 			}
 		}
 	}

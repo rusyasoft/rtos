@@ -14,13 +14,17 @@
 #include <unistd.h>
 #include <readline.h>
 
-#define address 0xc0a8640a
-#define BUF_SIZE 8
-#define SERVER_PORT 10000
+#define address 0xc0a8640b
+#define BUF_SIZE 1460
+#define SERVER_PORT 9005
 
+extern uint32_t count2;
 uint64_t total_rcv;
+uint64_t total_rcv2;
 uint32_t err[6];
+uint32_t err2[6];
 int64_t socket;
+int64_t socket2;
 bool flag;
 uint8_t buffer[BUF_SIZE +1];
 
@@ -31,7 +35,14 @@ bool bps_checker(void* context) {
 	err[5] = 0;
 	
 	total_rcv = 0;
-
+/*
+	printf("%u bps, %u, %u, %u, %u, %u\n", total_rcv2 * 8, err2[1], err2[2], err2[3], err2[4], err2[5]);
+	err2[2] = 0;
+	err2[3] = 0;
+	err2[5] = 0;
+	
+	total_rcv2 = 0;
+*/
 	return true;
 }
 
@@ -43,6 +54,12 @@ int32_t my_connected(uint64_t socket, uint32_t addr, uint16_t port, void* contex
 
 int32_t my_received(uint64_t socket, void* buf, size_t len, void* context) {
 	total_rcv += len;
+
+	return 1;
+}
+
+int32_t my_received2(uint64_t socket, void* buf, size_t len, void* context) {
+	total_rcv2 += len;
 
 	return 1;
 }
@@ -71,10 +88,13 @@ void ginit(int argc, char** argv) {
 	
 	event_init();
 	total_rcv = 0;
+	total_rcv2 = 0;
 	for(int i = 0; i < 6; i++) {
 		err[i] = 0;
 	}
-
+	for(int i = 0; i < 6; i++) {
+		err2[i] = 0;
+	}
 	tcp_init();
 	event_timer_add(bps_checker, NULL, 0, 1000000);
 	
@@ -134,8 +154,6 @@ int main(int argc, char** argv) {
 	
 	printf("test!!\n");
 	NetworkInterface* ni = ni_get(0);
-	
-	uint64_t count = 0;
 
 	while(1) {
 		if(ni_has_input(ni)) {
@@ -143,13 +161,16 @@ int main(int argc, char** argv) {
 		}
 		
 		int ret;
-		if((ret = tcp_send(socket, &count, BUF_SIZE)) < 0) {
+		if((ret = tcp_send(socket, buffer, BUF_SIZE)) < 0) {
 			ret = -ret;
 			err[ret]++;
-		} else {
-			count++;
 		}
-
+		/*
+		if((ret = tcp_send(socket2, buffer, BUF_SIZE)) < 0) {
+			ret = -ret;
+			err2[ret]++;
+		}
+		*/
 		
 		event_loop();
 	}

@@ -9,16 +9,17 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
-#define BUF_LEN 1460
+#define BUF_LEN 8
 
 unsigned long snd_data;
 unsigned long rcv_data;
+uint64_t count = 0;
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *bps_checker(void* arg) {
 	while(1) {
-		printf("snd : %lu, rcv : %lu bps\n", snd_data * 8, rcv_data * 8);
+		printf("snd : %lu, rcv : %lu bps count : %lu\n", snd_data * 8, rcv_data * 8, count);
 		pthread_mutex_lock(&lock);
 		snd_data = 0;
 		rcv_data = 0;
@@ -82,12 +83,19 @@ int main(int argc, char *argv[]) {
 		printf("Server : %s client connected.\n", temp);
 		
 		memset(buffer, 0xff, BUF_LEN);
+	
+		count = 0;
 
 		while(1) {
 			int rcv_size = read(client_fd, buffer, BUF_LEN);
-			int snd_size = write(client_fd, buffer, rcv_size);
+			if(*(uint64_t*)buffer != count)
+				printf("data error!\n");
+
+			count++;
+
+			//int snd_size = write(client_fd, buffer, rcv_size);
 			pthread_mutex_lock(&lock);
-			snd_data += snd_size;
+			//snd_data += snd_size;
 			rcv_data += rcv_size;
 			pthread_mutex_unlock(&lock);
 		}

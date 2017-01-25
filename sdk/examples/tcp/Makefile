@@ -16,6 +16,7 @@ obj/%.o: src/%.c
 	gcc -o server server.c -lpthread
 	gcc -o client client.c -lpthread
 	gcc -o mul_server multi_server.c -lpthread
+	gcc -o integrity integrity.c -lpthread
 
 clean:
 	rm -rf obj
@@ -24,6 +25,7 @@ clean:
 	rm -f server
 	rm -f client
 	rm -f mul_server
+	rm -f integrity
 
 run: all
 	../../bin/console script

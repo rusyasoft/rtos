@@ -15,78 +15,96 @@
 #include <readline.h>
 
 #define address 0xc0a8640a
-#define BUF_SIZE 8
+#define BUF_SIZE 100
 #define SERVER_PORT 10000
+#define SOCK_NUM 1100
+#define SERVER_IP	0xc0a86403
 
+extern uint32_t count2;
 uint64_t total_rcv;
-uint32_t err[6];
-int64_t socket;
-bool flag;
+uint64_t sockets[SOCK_NUM];
+uint32_t conn;
+uint32_t send_count;
 uint8_t buffer[BUF_SIZE +1];
-
-bool bps_checker(void* context) {
-	printf("%u bps, %u, %u, %u, %u, %u, %u, %u\n", total_rcv * 8, *debug_max, *debug_cur,  err[1], err[2], err[3], err[4], err[5]);
-	err[2] = 0;
-	err[3] = 0;
-	err[5] = 0;
-	
-	total_rcv = 0;
-
-	return true;
-}
+uint64_t old_time;
+NetworkInterface* ni;
 
 int32_t my_connected(uint64_t socket, uint32_t addr, uint16_t port, void* context) {
-	printf("connected : %u, %u, %u\n", socket, addr, port);
+	uint64_t cur_time = timer_ms();
+	conn++;
 
-	return 1;
-}
+	if(cur_time - old_time > 500) {
+		printf("%u connected!\n", conn);
+		old_time = cur_time;
+	} 
 
-int32_t my_received(uint64_t socket, void* buf, size_t len, void* context) {
-	total_rcv += len;
+	send_count = 0;
 
-	return 1;
+	if(tcp_send(sockets[send_count], "hello", 5) <= 0) {
+		printf("send error!\n");
+		while(1);
+	}
+
+	return 0;
 }
 
 int32_t my_sent(uint64_t socket, size_t len, void* context) {
-	//printf("sent %s\n", buf);
-	
-	return 1;
+
+	return 0;
+}
+
+int32_t my_received(uint64_t socket, void* buf, size_t len, void* context) {
+	send_count++;
+
+	if(send_count < conn) {
+		if(tcp_send(sockets[send_count], "hello", 5) <= 0) {
+			printf("send error!\n");
+			while(1);
+		}
+	} else {
+		uint64_t tmp_socket = tcp_connect(ni, SERVER_IP, SERVER_PORT);
+		if(tmp_socket == 0) {
+			printf("%u conn error!\n", conn);
+			while(1);
+		}
+		sockets[conn] = tmp_socket;
+		tcp_connected(tmp_socket, my_connected);
+		tcp_sent(tmp_socket, my_sent);
+		tcp_received(tmp_socket, my_received);
+	}
+
+	return 0;
 }
 
 void destroy() {
 }
 void gdestroy() {
-	tcp_close(socket);
-
-	printf("tcp closed!!\n");
 }
 
 void ginit(int argc, char** argv) {
-	NetworkInterface* ni = ni_get(0);
+	ni = ni_get(0);
 	if(ni != NULL) {
 		ni_ip_add(ni, address);
 	}
 
 	memset(buffer, 0xff, BUF_SIZE);
+
+	conn = 0;
 	
-	event_init();
-	total_rcv = 0;
-	for(int i = 0; i < 6; i++) {
-		err[i] = 0;
+	tcp_init();
+
+	uint64_t tmp_socket = tcp_connect(ni, SERVER_IP, SERVER_PORT);
+	if(tmp_socket == 0) {
+		printf("conn error!\n");
+		while(1);
 	}
 
-	tcp_init();
-	event_timer_add(bps_checker, NULL, 0, 1000000);
-	
-	uint32_t server_ip = 0xc0a86403;
-	uint16_t server_port = SERVER_PORT;
-	
-	flag = false;
-	socket = tcp_connect(ni, server_ip, server_port);
-	printf("socket : %lu\n", socket);
-	tcp_connected(socket, my_connected);
-	tcp_sent(socket, my_sent);
-	tcp_received(socket, my_received);	
+	old_time = timer_ms();
+
+	sockets[conn] = tmp_socket;
+	tcp_connected(tmp_socket, my_connected);
+	tcp_sent(tmp_socket, my_sent);
+	tcp_received(tmp_socket, my_received);
 }
 		
 void init(int argc, char** argv) {
@@ -132,25 +150,12 @@ int main(int argc, char** argv) {
 	
 	thread_barrior();
 	
-	printf("test!!\n");
 	NetworkInterface* ni = ni_get(0);
-	
-	uint64_t count = 0;
-
 	while(1) {
 		if(ni_has_input(ni)) {
 			process(ni);
 		}
-		
-		int ret;
-		if((ret = tcp_send(socket, &count, BUF_SIZE)) < 0) {
-			ret = -ret;
-			err[ret]++;
-		} else {
-			count++;
-		}
 
-		
 		event_loop();
 	}
 
