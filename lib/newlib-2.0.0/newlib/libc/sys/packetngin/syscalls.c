@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#include "../../../../../TLSF/src/tlsf.h"
+#include "../../../../../tlsf/src/tlsf.h"
 #include "../../../../../core/include/util/ring.h"
 
 char **environ;

@@ -1,13 +1,15 @@
 project 'kernel'
-    kind        'ConsoleApp'
-    targetname  'kernel.elf'
-    linkoptions '-T elf_x86_64.ld -e main'
+    kind 'ConsoleApp'
+
+    build.compileProperty('x86_64')
+    build.linkingProperty { 'core', 'tlsf', 'lwip' }
+
+    targetname      'kernel.elf'
+    buildoptions    { '-mcmodel=kernel' }
+    linkoptions     { '-T elf_x86_64.ld -e main' }
 
     -- Make version header
     prebuildcommands './mkver.sh > src/version.h'
-
-    buildProperty('x86_64', { 'core', 'tlsf', 'lwip' })
-
 
         -- Compile test sources when configured
 --[[
