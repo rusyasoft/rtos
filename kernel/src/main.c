@@ -4,7 +4,7 @@
 #include <errno.h>
 
 // Core
-#include "util/event.h"
+#include <util/event.h>
 
 // Kernel
 #include "asm.h"
@@ -33,6 +33,7 @@
 #include "shell.h"
 #include "loader.h"
 #include "vfio.h"
+#include "shared.h"
 
 // Drivers
 #include "driver/pata.h"
@@ -116,7 +117,7 @@ static bool idle0_event(void* data) {
 	
 	if(time > tick) {
 		tick = time + cpu_frequency;
-		ni_statistics(time);
+		nic_statistics(time);
 		printf("\033[0;68HLoad: %3d%%", (cpu_frequency - idle_time) * 100 / cpu_frequency);
 		idle_time = 0;
 		return;
@@ -254,10 +255,10 @@ static void icc_start(ICC_Message* msg) {
 	}
 
 	*(uint32_t*)task_addr(id, SYM_NIS_COUNT) = vm->nic_count;
-	NetworkInterface** nis = (NetworkInterface**)task_addr(id, SYM_NIS);
+	NIC** nics = (NIC**)task_addr(id, SYM_NIS);
 	for(int i = 0; i < vm->nic_count; i++) {
 		task_resource(id, RESOURCE_NI, vm->nics[i]);
-		nis[i] = vm->nics[i]->ni;
+		nics[i] = vm->nics[i]->nic;
 	}
 		
 	printf("Starting VM...\n");
@@ -407,8 +408,8 @@ void main(void) {
 
 		printf("\x1b""32mOK""\x1b""0m\n");
 
-		printf("Copy RAM disk image from 0x%x to 0x%x (%d)\n", initrd_start, RAMDISK_ADDR, initrd_end - initrd_start);
-		memcpy((void*)RAMDISK_ADDR, (void*)(uintptr_t)initrd_start, initrd_end - initrd_start);
+// 		printf("Copy RAM disk image from 0x%x to 0x%x (%d)\n", initrd_start, RAMDISK_ADDR, initrd_end - initrd_start);
+// 		memcpy((void*)RAMDISK_ADDR, (void*)(uintptr_t)initrd_start, initrd_end - initrd_start);
 
 		printf("Analyze CPU information...\n");
 		cpu_init();

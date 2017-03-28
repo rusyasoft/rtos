@@ -1,14 +1,15 @@
 #include <stdio.h>
 #include <string.h>
-#include <tlsf.h>
 #include <util/list.h>
+#include <tlsf.h>
 #include <malloc.h>
+#include <_malloc.h>
+#include "malloc.h"
 #include "idt.h"
 #include "pnkc.h"
 #include "mp.h"
 #include "shared.h"
 #include "multiboot2.h"
-#include "malloc.h"
 #include "gmalloc.h"
 
 void* gmalloc_pool;
@@ -69,8 +70,12 @@ void gmalloc_init(uintptr_t ramdisk_addr, uint32_t ramdisk_size) {
 		uintptr_t end;
 	} Block;
 	
-	Block reserved[3 + MP_MAX_CORE_COUNT];
+	Block reserved[4 + MP_MAX_CORE_COUNT];
 	int reserved_count = 0;
+	reserved[reserved_count].start = 0x00;		// IVT & BDA
+	reserved[reserved_count].end = 0x4ff;
+	reserved_count++;
+
 	reserved[reserved_count].start = 0x100000;	// Description table
 	reserved[reserved_count].end = 0x200000;
 	reserved_count++;

@@ -12,6 +12,7 @@
 
 int32_t* debug_cur;
 int32_t* debug_max;
+//uint32_t debug_same;
 /**
  * TCPv4 header
  */
@@ -49,19 +50,22 @@ typedef struct _TCP_Pseudo {
 	uint16_t        length;			///< Header and data length in bytes (endian32)
 } __attribute__((packed)) TCP_Pseudo;
 
-typedef int (*connected)(uint32_t socket, uint32_t addr, uint16_t port, void* context);
-typedef int (*bound)(uint32_t socket, uint32_t addr, uint16_t port, void* context);
-typedef int (*disconnected)(uint32_t socket);
-typedef int (*sent)(uint32_t socket, size_t len, void* context);
-typedef int (*received)(uint32_t socket, const void* buf, size_t len, void* context);
+/**
+ * Callbacks
+ */
+typedef int32_t (*TCP_CONNECTED)(uint64_t socket, uint32_t addr, uint16_t port, void* context);
+typedef int32_t (*TCP_BOUND)(uint64_t socket, uint32_t addr, uint16_t port, void* context);
+typedef int32_t (*TCP_DISCONNECTED)(uint64_t socket, void* context);
+typedef int32_t (*TCP_SENT)(uint64_t socket, size_t len, void* context);
+typedef int32_t (*TCP_RECEIVED)(uint64_t socket, void* buf, size_t len, void* context);
 
-typedef struct {
-	connected connected;
-	bound bound;
-	disconnected disconnected;
-	sent sent;
-	received received;
-} TCPCallback;
+// TODO: socket ID -> uint32_t
+bool tcp_connected(uint64_t socket, TCP_CONNECTED connected);
+bool tcp_bound(uint64_t socket, TCP_BOUND bound);
+bool tcp_disconnected(uint64_t socket, TCP_DISCONNECTED disconnected);
+bool tcp_sent(uint64_t socket, TCP_SENT sent);
+bool tcp_received(uint64_t socket, TCP_RECEIVED received);
+bool tcp_context(uint64_t socket, void* context);
 
 /**
   * Init valuse about tcp.
@@ -69,11 +73,6 @@ typedef struct {
   * @return false if initiation fail, else true.
   */
 bool tcp_init();
-
-/**
-  * TCP timer function, need to be added using event_add().
-  */
-bool tcp_timer(void* context);
 
 /**
  * Process all TCP packet.
@@ -84,40 +83,17 @@ bool tcp_timer(void* context);
 bool tcp_process(Packet* packet);
 
 /**
- * Get callbacks pointer of socket.
- *
- * @param socket socket number
- * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
- */
-TCPCallback* tcp_get_callback(int32_t socket);
-
-/**
- * Set callbacks pointer of socket.
- *	
- * @param socket socket number
- * @param callback new callbacks to set
- * @param context callback's context
- * @return NULL if fail, else TCPCallback pointer and make new pointer if there was no callback 
- */
-void tcp_set_callback(int32_t socket, TCPCallback* callback, void* context);
-
-/**
- * Allocate Memory to hold callback functions.
- *
- * @return NULL if fail, else TCPCallback pointer 
- */
-TCPCallback* tcp_callback_create();
-
-/**
  * Connect to remote computer, Send SYN packet.
  *
- * @param ni NetworkInterface that IP is added.
- * @param dst_addr remote computer's IP address
- * @param dst_port remote computer's port
- * @param callback this connection's callback functions
- * @return < 0 if error occurred, else socket number used tcb_key internally
+ * @param ni NetworkInterface that IP is added
+ * @param address remote computer's IP address
+ * @param port remote computer's port
+ * @return 0 if error occurred, else socket number used as a tcb_key internally
  */
-uint32_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port, TCPCallback* callback, void* context);
+// TODO: uint32_t return, 0 -> 0
+// ERROR; return 0, errno
+// TODO: socket's size!!
+uint64_t tcp_connect(NetworkInterface* ni, uint32_t address, uint16_t port);
 
 /**
  * Send data.
@@ -127,44 +103,9 @@ uint32_t tcp_connect(NetworkInterface* ni, uint32_t dst_addr, uint16_t dst_port,
  * @param len data's length
  * @return -1 if fail to send, else sent data size
  */
-int32_t tcp_send(uint32_t socket, void* data, const int32_t len);
+// TODO: socket's size!! to uint32_t !!!!
+int32_t tcp_send(uint64_t socket, void* data, const uint16_t len);
 
-bool tcp_close(uint32_t socket);
-
-/**
- * Allocate TCP port number which associated with NI.
- *
- * @param ni NI reference
- * @param addr
- * @param port
- * @return true if port alloc success
- */
-bool tcp_port_alloc0(NetworkInterface* ni, uint32_t addr, uint16_t port);
-
-/**
- * Allocate TCP port number which associated with NI.
- *
- * @param ni NI reference
- * @param addr
- * @return port number
- */
-uint16_t tcp_port_alloc(NetworkInterface* ni, uint32_t addr);
-
-/**
- * Free TCP port number.
- *
- * @param ni NI reference
- * @param addr
- * @param port port number to free
- */
-void tcp_port_free(NetworkInterface* ni, uint32_t addr, uint16_t port);
-
-/**
- * Set TCP checksum, and do IP packing.
- *
- * @param packet TCP packet to pack
- * @param tcp_body_len TCP body length in bytes
- */
-void tcp_pack(Packet* packet, uint16_t tcp_body_len);
+bool tcp_close(uint64_t socket);
 
 #endif /* __NET_TCP_H__ */

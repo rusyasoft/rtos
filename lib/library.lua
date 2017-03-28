@@ -18,6 +18,10 @@ workspace "Kernel"
         location "core/build"
         includedirs { "core/include", "TLSF/src", "jsmn/", "../cmocka/include" }
         files { "core/**.asm", "core/**.S", "core/**.h", "core/**.c" }
+         -- O0 optimziation
+        optimize "On"
+       -- Exclude test sources
+        removefiles { "core/test/*"} 
         -- Enable exntension instruction for SSE. Do not need stack protector 
         buildoptions { "-msse4.1 -fno-stack-protector" }
 
@@ -27,6 +31,10 @@ workspace "Kernel"
         location "core/build"
         includedirs { "core/include", "TLSF/src", "jsmn/", "../cmocka/include" }
         files { "core/**.asm", "core/**.S", "core/**.h", "core/**.c" }
+         -- O0 optimziation
+        optimize "On"
+        -- Exclude test sources and standard C library functions
+        removefiles { "core/test/*", "core/src/malloc.c" }
         buildoptions { "-msse4.1 -fno-stack-protector" }
         -- Define "LINUX" to make core library for Linux OS
         defines { "LINUX" }
@@ -37,6 +45,8 @@ workspace "Kernel"
         location "TLSF/build"
         includedirs { "TLSF/src" }
         files { "TLSF/**.h", "TLSF/**.c" }
+         -- O0 optimziation
+        optimize "On"
         removefiles { "TLSF/examples/*" }
         -- Enable extra waring flag
         buildoptions { "-Wextra -Wwrite-strings -Wstrict-prototypes -Wmissing-prototypes -Wno-long-long -Wstrict-aliasing=1"}
@@ -86,12 +96,11 @@ workspace "Kernel"
             "ar x ../libexpat.a",
             "ar rcs ../libpacketngin.a *.o",
 
-	    "cp -rL ../core/include/* ../../sdk/include",
-	    "cp -rL ../expat/include/* ../../sdk/include",
-	    "cp -rL ../openssl/include/* ../../sdk/include",
-	    "cp -rL ../zlib/*.h ../../sdk/include",
+	    "cp -rL ../core/include/* ../../include",
+	    "cp -rL ../expat/include/* ../../include",
+	    "cp -rL ../openssl/include/* ../../include",
+	    "cp -rL ../zlib/*.h ../../include",
 
-            "cp ../libpacketngin.a ../../sdk/lib/",
             "rm ./*.o -rf",
 
             -- Linux Application library

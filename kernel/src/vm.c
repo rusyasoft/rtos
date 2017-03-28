@@ -5,7 +5,6 @@
 #include <util/event.h>
 #include <util/ring.h>
 #include <net/md5.h>
-#include <tlsf.h>
 #include <timer.h>
 #include <file.h>
 #include "vm.h"
@@ -239,7 +238,7 @@ static void icc_stopped(ICC_Message* msg) {
 	printf("]\n");
 }
 
-static bool vm_destroy(VM* vm, int core) {
+static bool vm_delete(VM* vm, int core) {
 	bool is_destroy = true;
 	
 	if(core == -1) {
@@ -416,7 +415,7 @@ uint32_t vm_create(VMSpec* vm_spec) {
 	
 	if(j < vm->core_size) {
 		printf("Manager: Not enough core to allocate.\n");
-		vm_destroy(vm, -1);
+		vm_delete(vm, -1);
 		return 0;
 	}
 	
@@ -430,7 +429,7 @@ uint32_t vm_create(VMSpec* vm_spec) {
 		vm->memory.blocks[i] = bmalloc();
 		if(!vm->memory.blocks[i]) {
 			printf("Manager: Not enough memory to allocate.\n");
-			vm_destroy(vm, -1);
+			vm_delete(vm, -1);
 			return 0;
 		}
 	}
@@ -445,7 +444,7 @@ uint32_t vm_create(VMSpec* vm_spec) {
 		vm->storage.blocks[i] = bmalloc();
 		if(!vm->storage.blocks[i]) {
 			printf("Manager: Not enough storage to allocate.\n");
-			vm_destroy(vm, -1);
+			vm_delete(vm, -1);
 			return 0;
 		}
 	}
@@ -476,34 +475,40 @@ uint32_t vm_create(VMSpec* vm_spec) {
 				mac |= 0x03L << 40;	// Locally administrered
 				mac ^= 0x01L << 40; // Unicast set
 			} while(vnic_contains(nics[i].dev, mac));
+		} else if(mac & NICSPEC_DEVICE_MAC) {
+			mac = vnic_get_device_mac(nics[i].dev);
+			if(vnic_contains(nics[i].dev, mac)) {
+				vm_delete(vm, -1);
+				return 0;
+			}
 		} else if(vnic_contains(nics[i].dev, mac)) {
 			printf("Manager: The mac address already in use: %012x.\n", mac);
 			map_remove(vms, (void*)(uint64_t)vmid);
-			vm_destroy(vm, -1);
+			vm_delete(vm, -1);
 			return 0;
 		}
 		
 		uint64_t attrs[] = { 
-			NI_MAC, mac,
-			NI_DEV,	(uint64_t)nics[i].dev,
-			NI_INPUT_BUFFER_SIZE, nics[i].input_buffer_size,
-			NI_OUTPUT_BUFFER_SIZE, nics[i].output_buffer_size,
-			NI_INPUT_BANDWIDTH, nics[i].input_bandwidth,
-			NI_OUTPUT_BANDWIDTH, nics[i].output_bandwidth,
-			NI_PADDING_HEAD, nics[i].padding_head ? nics[i].padding_head : 32,
-			NI_PADDING_TAIL, nics[i].padding_tail ? nics[i].padding_tail : 32,
-			NI_POOL_SIZE, nics[i].pool_size,
-			NI_INPUT_ACCEPT_ALL, 1,
-			NI_OUTPUT_ACCEPT_ALL, 1,
-			NI_INPUT_FUNC, 0,
-			NI_NONE
+			NIC_MAC, mac,
+			NIC_DEV,	(uint64_t)nics[i].dev,
+			NIC_INPUT_BUFFER_SIZE, nics[i].input_buffer_size,
+			NIC_OUTPUT_BUFFER_SIZE, nics[i].output_buffer_size,
+			NIC_INPUT_BANDWIDTH, nics[i].input_bandwidth,
+			NIC_OUTPUT_BANDWIDTH, nics[i].output_bandwidth,
+			NIC_PADDING_HEAD, nics[i].padding_head ? nics[i].padding_head : 32,
+			NIC_PADDING_TAIL, nics[i].padding_tail ? nics[i].padding_tail : 32,
+			NIC_POOL_SIZE, nics[i].pool_size,
+			NIC_INPUT_ACCEPT_ALL, 1,
+			NIC_OUTPUT_ACCEPT_ALL, 1,
+			NIC_INPUT_FUNC, 0,
+			NIC_NONE
 		};
 		
 		vm->nics[i] = vnic_create(attrs);
 		if(!vm->nics[i]) {
 			printf("Manager: Not enough VNIC to allocate: errno=%d.\n", errno);
 			map_remove(vms, (void*)(uint64_t)vmid);
-			vm_destroy(vm, -1);
+			vm_delete(vm, -1);
 			return 0;
 		}
 	}
@@ -529,7 +534,7 @@ uint32_t vm_create(VMSpec* vm_spec) {
 			else
 				printf(" ");
 		}
-		printf("%dMbps/%d, %dMbps/%d, %dMBs\n", nic->input_bandwidth / 1000000, fifo_capacity(nic->ni->input_buffer) + 1, nic->output_bandwidth / 1000000, fifo_capacity(nic->ni->output_buffer) + 1, list_size(nic->pools) * 2); }
+		printf("%dMbps/%d, %dMbps/%d, %dMBs\n", nic->input_bandwidth / 1000000, fifo_capacity(nic->nic->input_buffer) + 1, nic->output_bandwidth / 1000000, fifo_capacity(nic->nic->output_buffer) + 1, list_size(nic->pools) * 2); }
 	
 	printf("\targs(%d): ", vm->argc);
 	for(int i = 0; i < vm->argc; i++) {
@@ -544,7 +549,7 @@ uint32_t vm_create(VMSpec* vm_spec) {
 	return vmid;
 }
 
-bool vm_delete(uint32_t vmid) {
+bool vm_destroy(uint32_t vmid) {
 	VM* vm = map_get(vms, (void*)(uint64_t)vmid);
 	if(!vm)
 		return false;
@@ -565,7 +570,7 @@ bool vm_delete(uint32_t vmid) {
 	}
 	printf("]\n");
 	
-	vm_destroy(vm, -1);
+	vm_delete(vm, -1);
 	
 	return true;
 }
@@ -636,6 +641,12 @@ void vm_status_set(uint32_t vmid, int status, VM_STATUS_CALLBACK callback, void*
 	uint64_t event_type = 0;
 	switch(status) {
 		case VM_STATUS_START:
+			if(vm->used_size <= 0) {
+				printf("File size is 0. File is not uploaded on RTVM storage.\n");
+				callback(false, context);
+				//callback("File size is 0. File is not uploaded on RTVM storage.", context);
+				return;
+			}
 			if(vm->status != VM_STATUS_STOP) {
 				callback(false, context);
 				return;
@@ -760,15 +771,19 @@ ssize_t vm_storage_write(uint32_t vmid, void* buf, size_t offset, size_t size) {
 			size_t write_size = VM_STORAGE_SIZE_ALIGN - offset;
 			memcpy(vm->storage.blocks[index] + offset, buf, write_size);
 			_size -= write_size;
+			buf += write_size;
 		} else {
 			memcpy(vm->storage.blocks[index] + offset, buf, _size);
 			_size = 0;
 		}
 
-		if(_size == 0)
+		if(_size == 0) {
+			vm->used_size = size;
 			break;
+		}
 		offset = 0;
 	}
+
 
 	if(_size != 0)
 		return -1;

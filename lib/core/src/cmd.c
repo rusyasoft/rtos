@@ -1,60 +1,88 @@
 #include <stdbool.h>
-#include <_string.h>
+#include <string.h>
 #include <malloc.h>
 #include <util/cmd.h>
 #include <util/map.h>
+#include <util/fifo.h>
 
 static Map* variables = NULL;
 static char* variable = NULL;
 char cmd_result[CMD_RESULT_SIZE];
 
-int cmd_help(int argc, char** argv, void(*callback)(char* result, int exit_status)) {
+static int cmd_print(char* cmd) {
         int command_len = 0;
-	if(argc == 1) {
-		for(int i = 0; commands[i].name != NULL; i++) {
-			int len = strlen(commands[i].name);
-			command_len = len > command_len ? len : command_len;
-		}
-
-		for(int i = 0; commands[i].name != NULL; i++) {
-			printf("%s", commands[i].name);
-			int len = strlen(commands[i].name);
-			len = command_len - len + 2;
-			for(int j = 0; j < len; j++)
-			       putchar(' ');
-			if(commands[i].args != NULL) {
-				printf("%s  %s\n", commands[i].desc, commands[i].args);
-			} else
-				printf("%s\n", commands[i].desc);
-		}
-	} else if(argc == 2) {
-		for(int i = 0; commands[i].name != NULL; i++) {
-			if(!strcmp(commands[i].name, argv[1])) {
-				printf("%s", commands[i].name);
-				int len = strlen(commands[i].name);
-				len = len + 2;
-				for(int j = 0; j < len; j++)
-				       putchar(' ');
-				if(commands[i].args != NULL) {
-					printf("%s  %s\n", commands[i].desc, commands[i].args);
-				} else
-					printf("%s\n", commands[i].desc);
-
-				goto end;
-			}
-		}
-		printf("no help topics match '%s'\n", argv[1]);
-		if(callback != NULL)
-			callback("false", 0);
-
-		return 0;
+	for(int i = 0; commands[i].name != NULL; i++) {
+		int len = strlen(commands[i].name);
+		command_len = len > command_len ? len : command_len;
 	}
 
-end:
+	if(command_len == 0)
+		// No commands at all
+		return -1;
+
+	bool found = false;
+	for(int i = 0; commands[i].name != NULL; i++) {
+		if(cmd)
+			if(strcmp(commands[i].name, cmd))
+				continue;
+
+		// Name
+		printf("%s", commands[i].name);
+		int len = strlen(commands[i].name);
+		len = command_len - len + 2;
+		for(int j = 0; j < len; j++)
+			putchar(' ');
+		
+		// Description
+		printf("%s\n", commands[i].desc);
+
+		// Arguments
+		if(commands[i].args != NULL) {
+			for(int j = 0; j < command_len + 2; j++)
+				putchar(' ');
+
+			printf("%s\n", commands[i].args);
+		}
+
+		if(!found)
+			found = true;
+	}
+
+	if(!found)
+		// Requested command not found
+		return -2;
+
+	return 0;
+
+}
+
+int cmd_help(int argc, char** argv, void(*callback)(char* result, int exit_status)) {
+	if(argc == 1) {
+		// NULL prints all commands
+		cmd_print(NULL);
+
+	} else if(argc == 2) {
+		if(cmd_print(argv[1]) < 0) {
+			printf("No help topic matched '%s'\n", argv[1]);
+			goto fail;
+		}
+
+	} else if(argc >= 3) {
+		printf("Wrong number of arguments");
+		goto fail;
+	}
+
+success:
 	if(callback != NULL)
 		callback("true", 0);
 
         return 0;
+
+fail:
+	if(callback != NULL)
+		callback("false", 0);
+
+	return 0;
 }
 
 static int cmd_parse_line(char* line, char** argv) {
@@ -81,6 +109,7 @@ static int cmd_parse_line(char* line, char** argv) {
 					break;
 				case ' ':
 				case '\0':
+				case '\t':
 					if(is_start == false) {
 						line[i] = '\0';
 						argv[argc++] = start;
@@ -135,8 +164,6 @@ static Command* cmd_get(int argc, char** argv) {
                         return &commands[i];
                 }
         }
-        if(argc > 0)
-                printf("%s : command not found\n", argv[0]);
 
         return NULL;
 }
@@ -171,27 +198,102 @@ void cmd_update_var(char* result, int exit_status) {
 	}
 }
 
+static void cmd_history_reset() {
+	cmd_history.index = -1;
+}
+
+static bool cmd_history_using() {
+	return (cmd_history.index != -1);
+}
+
+static int cmd_history_save(char* line) {
+	int len = strlen(line);
+	if(len <= 0)
+		return -1;
+
+	FIFO* histories = cmd_history.histories;
+	char* buf = malloc(len + 1);
+	strcpy(buf, line);
+	if(!fifo_available(histories)) {
+		char* str = fifo_pop(histories);
+		free(str);
+	}
+
+	fifo_push(histories, buf);
+	return 0;
+}
+
+static int cmd_history_count() {
+	return fifo_size(cmd_history.histories);
+}
+
+static char* cmd_history_get(size_t idx) {
+	FIFO* histories = cmd_history.histories;
+	if(fifo_empty(histories))
+		return NULL;
+
+	if(idx >= (fifo_size(histories) - 1))
+		idx = fifo_size(histories) - 1;
+
+	// Return reversely
+	idx = fifo_size(histories) - 1 - idx;
+	return fifo_peek(histories, idx);
+}
+
+static char* cmd_history_get_past() {
+	if(cmd_history.index >= (cmd_history_count() - 1))
+		return cmd_history_get(cmd_history.index);
+
+	return cmd_history_get(++cmd_history.index);
+}
+
+static char* cmd_history_get_current() {
+	if(cmd_history.index == -1)
+		return NULL;
+
+	return cmd_history_get(cmd_history.index);
+}
+
+static char* cmd_history_get_later() {
+	if(cmd_history.index <= 0)
+		return NULL;
+
+	return cmd_history_get(--cmd_history.index);
+}
+
+#define HISTORY_SIZE 30
+
+CommandHistory cmd_history = {
+	.index = -1, // Initial index value
+	.using = cmd_history_using,
+	.reset = cmd_history_reset,
+	.save = cmd_history_save,
+	.count = cmd_history_count,
+	.get_past = cmd_history_get_past,
+	.get_current = cmd_history_get_current,
+	.get_later = cmd_history_get_later,
+};
+
 void cmd_init(void) {
 	variables = map_create(16, map_string_hash, map_string_equals, NULL);
 	map_put(variables, strdup("$?"), strdup("(nil)"));
 	map_put(variables, strdup("$nil"), strdup("(nil)"));
+	cmd_history.histories = fifo_create(HISTORY_SIZE, NULL);
 }
 
-//1. check argument
-//2. get variable
-//3. 
 int cmd_exec(char* line, void(*callback)(char* result, int exit_status)) {
 	int argc;
 	char* argv[CMD_MAX_ARGC];
-	
+
 	argc = cmd_parse_line(line, argv);
 	if(argc == 0 || argv[0][0] == '#')
 		return 0;
 
 	cmd_parse_var(&argc, argv);
 
-	if(cmd_parse_arg(argc, argv) == false)
+	if(cmd_parse_arg(argc, argv) == false) {
 		return CMD_VARIABLE_NOT_FOUND;
+	}
 
 	Command* cmd = cmd_get(argc, argv);
 	int exit_status = CMD_STATUS_NOT_FOUND;

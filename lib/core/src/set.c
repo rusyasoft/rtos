@@ -1,4 +1,4 @@
-#include <_string.h>
+#include <string.h>
 #include <_malloc.h>
 #include <util/set.h>
 
@@ -141,22 +141,6 @@ bool set_put(Set* set, void* data) {
 }
 
 void* set_get(Set* set, void* data) {
-	size_t index = set->hash(data) % set->capacity;
-	if(!set->table[index]) {
-		return NULL;
-	}
-	
-	size_t size = list_size(set->table[index]);
-	for(size_t i = 0; i < size; i++) {
-		SetEntry* entry = list_get(set->table[index], i);
-		if(set->equals(entry->data, data))
-			return entry->data;
-	}
-	
-	return NULL;
-}
-
-void* set_get_data(Set* set, void* data) {
 	size_t index = set->hash(data) % set->capacity;
 	if(!set->table[index]) {
 		return NULL;
