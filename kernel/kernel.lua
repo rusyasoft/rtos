@@ -21,7 +21,7 @@ workspace "Kernel"
         -- Name of genrated file is 
         targetname "kernel.elf"
         -- O0 optimziation
-        optimize "Off"
+        optimize "On"
         -- Force to make symbol table
         flags { "Symbols" }
 
@@ -55,8 +55,10 @@ workspace "Kernel"
 
             files {
                 "src/test.c", "src/test/**.c", "src/test/**.h",
-                "../tools/aceunit/src/AceUnit.c", "../tools/aceunit/src/AceUnitData.c", 
-                "../tools/aceunit/src/loggers/FullPlainLogger.c", "../tools/aceunit/include/**.h"}
+                "../tools/aceunit/src/AceUnit.c", 
+                "../tools/aceunit/src/AceUnitData.c", 
+                "../tools/aceunit/src/loggers/FullPlainLogger.c", 
+                "../tools/aceunit/include/**.h"}
 
             defines { "TEST", "ACEUNIT_ASSERTION_STYLE=ACEUNIT_ASSERTION_STYLE_RETURN", "ACEUNIT_SUITES" }
             includedirs { "../tools/aceunit/include" }

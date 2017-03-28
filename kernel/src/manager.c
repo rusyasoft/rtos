@@ -5,13 +5,13 @@
 #include <malloc.h>
 #include <errno.h>
 #include <net/ether.h>
-#undef IP_TTL
 #include <net/ip.h>
 #include <net/arp.h>
 #include <net/icmp.h>
 #include <net/checksum.h>
 #include <net/udp.h>
 #include <net/tftp.h>
+#include <net/dhcp.h>
 #include <util/list.h>
 #include <util/ring.h>
 #include <util/event.h>
@@ -29,7 +29,7 @@
 #define DEFAULT_MANAGER_IP	0xc0a864fe	// 192.168.100.254
 #define DEFAULT_MANAGER_GW	0xc0a864c8	// 192.168.100.200
 #define DEFAULT_MANAGER_NETMASK	0xffffff00	// 255.255.255.0
-#define DEFAULT_MANAGER_PORT	111
+#define DEFAULT_MANAGER_PORT	1111
 
 uint64_t manager_mac;
 static struct netif* manager_netif;
@@ -51,7 +51,7 @@ static err_t manager_poll(void* arg, struct tcp_pcb* pcb);
 
 static void rpc_free(RPC* rpc) {
 	RPCData* data = (RPCData*)rpc->data;
-	
+
 	ListIterator iter;
 	list_iterator_init(&iter, data->pbufs);
 	while(list_iterator_has_next(&iter)) {
@@ -62,7 +62,7 @@ static void rpc_free(RPC* rpc) {
 	list_destroy(data->pbufs);
 	list_remove_data(actives, rpc);
 	free(rpc);
-	
+
 	list_remove_data(clients, data->pcb);
 }
 
@@ -73,13 +73,13 @@ static void manager_close(struct tcp_pcb* pcb, RPC* rpc, bool is_force) {
 	tcp_recv(pcb, NULL);
 	tcp_err(pcb, NULL);
 	tcp_poll(pcb, NULL, 0);
-	
+
 	if(rpc) {
 		rpc_free(rpc);
 	} else {
 		list_remove_data(clients, pcb);
 	}
-	
+
 	if(is_force) {
 		tcp_abort(pcb);
 	} else if(tcp_close(pcb) != ERR_OK) {
@@ -90,7 +90,7 @@ static void manager_close(struct tcp_pcb* pcb, RPC* rpc, bool is_force) {
 
 static err_t manager_recv(void* arg, struct tcp_pcb* pcb, struct pbuf* p, err_t err) {
 	RPC* rpc = arg;
-	
+
 	if(p == NULL) {	// Remote host closed the connection
 		manager_close(pcb, rpc, false);
 	} else if(err != ERR_OK) {
@@ -107,7 +107,7 @@ static err_t manager_recv(void* arg, struct tcp_pcb* pcb, struct pbuf* p, err_t 
 			}
 		}
 	}
-	
+
 	return ERR_OK;
 }
 
@@ -122,19 +122,19 @@ static void manager_err(void* arg, err_t err) {
 
 static err_t manager_poll(void* arg, struct tcp_pcb* pcb) {
 	RPC* rpc = arg;
-	
+
 	if(rpc == NULL) {
 		manager_close(pcb, NULL, true);
 	} else {
 		RPCData* data = (RPCData*)rpc->data;
 		data->poll_count++;
-		
+
 		if(rpc->ver == 0 && data->poll_count++ >= 4) {	// 2 seconds
 			printf("Close connection: not receiving hello in 2 secs.\n");
 			manager_close(pcb, rpc, false);
 		}
 	}
-	
+
 	return ERR_OK;
 }
 
@@ -154,8 +154,8 @@ static void vm_set_handler(RPC* rpc, VMSpec* vm, void* context, void(*callback)(
 	callback(rpc, false);
 }
 
-static void vm_delete_handler(RPC* rpc, uint32_t vmid, void* context, void(*callback)(RPC* rpc, bool result)) {
-	bool result = vm_delete(vmid);
+static void vm_destroy_handler(RPC* rpc, uint32_t vmid, void* context, void(*callback)(RPC* rpc, bool result)) {
+	bool result = vm_destroy(vmid);
 	callback(rpc, result);
 }
 
@@ -178,7 +178,7 @@ typedef struct {
 
 static void status_setted(bool result, void* context) {
 	Data* data = context;
-	
+
 	if(list_index_of(clients, data->pcb, NULL) >= 0) {
 		data->callback(data->rpc, result);
 	}
@@ -190,7 +190,7 @@ static void status_set_handler(RPC* rpc, uint32_t vmid, VMStatus status, void* c
 	data->rpc = rpc;
 	data->pcb = context;
 	data->callback = callback;
-	
+
 	vm_status_set(vmid, status, status_setted, data);
 }
 
@@ -209,6 +209,7 @@ static void storage_download_handler(RPC* rpc, uint32_t vmid, uint64_t download_
 }
 
 static void storage_upload_handler(RPC* rpc, uint32_t vmid, uint32_t offset, void* buf, int32_t size, void* context, void(*callback)(RPC* rpc, int32_t size)) {
+	static int total_size = 0;
 	if(size < 0) {
 		callback(rpc, size);
 	} else {
@@ -219,20 +220,24 @@ static void storage_upload_handler(RPC* rpc, uint32_t vmid, uint32_t offset, voi
 				return;
 			}
 		}
-		
+
 		if(size < 0) {
 			printf(". Aborted: %d\n", size);
 			callback(rpc, size);
 		} else {
 			size = vm_storage_write(vmid, buf, offset, size);
 			callback(rpc, size);
-			 
-			if(size > 0)
+
+			if(size > 0) {
 				printf(".");
-			else if(size == 0)
-				printf(". Done\n");
-			else if(size < 0)
+				total_size += size;
+			} else if(size == 0) {
+				printf(". Done. Total size: %d\n", total_size);
+				total_size = 0;
+			} else if(size < 0) {
 				printf(". Error: %d\n", size);
+				total_size = 0;
+			}
 		}
 	}
 }
@@ -310,7 +315,7 @@ static err_t manager_accept(void* arg, struct tcp_pcb* pcb, err_t err) {
 	rpc_vm_create_handler(rpc, vm_create_handler, NULL);
 	rpc_vm_get_handler(rpc, vm_get_handler, NULL);
 	rpc_vm_set_handler(rpc, vm_set_handler, NULL);
-	rpc_vm_delete_handler(rpc, vm_delete_handler, NULL);
+	rpc_vm_destroy_handler(rpc, vm_destroy_handler, NULL);
 	rpc_vm_list_handler(rpc, vm_list_handler, NULL);
 	rpc_status_get_handler(rpc, status_get_handler, NULL);
 	rpc_status_set_handler(rpc, status_set_handler, pcb);
@@ -336,6 +341,9 @@ static err_t manager_accept(void* arg, struct tcp_pcb* pcb, err_t err) {
 // RPC Manager
 static Packet* manage(Packet* packet) {
 	if(shell_process(packet))
+		return NULL;
+
+	if(dhcp_process(packet))
 		return NULL;
 //	else if(rpc_process(packet))
 //		return NULL;
@@ -434,7 +442,7 @@ static bool manager_server_close() {
 	return true;
 }
 static bool manager_loop(void* context) {
-	ni_poll();
+	nic_poll();
 	
 	if(!list_is_empty(actives)) {
 		ListIterator iter;
@@ -453,51 +461,55 @@ static bool manager_loop(void* context) {
 }
 
 static bool manager_timer(void* context) {
-	ni_timer();
+	nic_timer();
 	
 	return true;
 }
 
 void manager_init() {
 	uint64_t attrs[] = { 
-		NI_MAC, manager_mac, // Physical MAC
-		NI_DEV, (uint64_t)"eth0",
-		NI_POOL_SIZE, 0x400000,
-		NI_INPUT_BANDWIDTH, 1000000000L,
-		NI_OUTPUT_BANDWIDTH, 1000000000L,
-		NI_INPUT_BUFFER_SIZE, 1024,
-		NI_OUTPUT_BUFFER_SIZE, 1024,
-		NI_PADDING_HEAD, 32,
-		NI_PADDING_TAIL, 32,
-		NI_INPUT_ACCEPT_ALL, 1,
-		NI_OUTPUT_ACCEPT_ALL, 1,
-		NI_NONE
+		NIC_MAC, manager_mac, // Physical MAC
+		NIC_DEV, (uint64_t)"eth0",
+		NIC_POOL_SIZE, 0x400000,
+		NIC_INPUT_BANDWIDTH, 1000000000L,
+		NIC_OUTPUT_BANDWIDTH, 1000000000L,
+		NIC_INPUT_BUFFER_SIZE, 1024,
+		NIC_OUTPUT_BUFFER_SIZE, 1024,
+		NIC_PADDING_HEAD, 32,
+		NIC_PADDING_TAIL, 32,
+		NIC_INPUT_ACCEPT_ALL, 1,
+		NIC_OUTPUT_ACCEPT_ALL, 1,
+		NIC_NONE
 	};
 	
-	manager_ni = vnic_create(attrs);
-	if(!manager_ni) {
+	manager_nic = vnic_create(attrs);
+	if(!manager_nic) {
 		printf("\tCannot create manager\n");
 		return;
 	}
 
+	// Default configuraiton
 	manager_ip = DEFAULT_MANAGER_IP;
-	if(!ni_ip_add(manager_ni->ni, DEFAULT_MANAGER_IP)) {
-		printf("\tCan'nt allocate manager ip\n");
+	if(!nic_ip_add(manager_nic->nic, DEFAULT_MANAGER_IP)) {
+		printf("\tCannot allocate manager ip\n");
 		return;
 	}
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, DEFAULT_MANAGER_IP);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, DEFAULT_MANAGER_IP);
 	interface->gateway = DEFAULT_MANAGER_GW;
 	interface->netmask = DEFAULT_MANAGER_NETMASK;
 	interface->_default = true;
 
-	if(!udp_port_alloc0(manager_ni->ni, DEFAULT_MANAGER_IP, manager_port)) {
-		printf("\tCan'nt allocate manager port\n");
+	if(!udp_port_alloc0(manager_nic->nic, DEFAULT_MANAGER_IP, manager_port)) {
+		printf("\tCannot allocate manager port\n");
 		return;
 	}
 	manager_port = DEFAULT_MANAGER_PORT;
 	
-	manager_netif = ni_init(manager_ni->ni, manage, NULL);
+	// Dynamic configuration
+	dhcp_init(manager_nic->nic);
+
+	manager_netif = nic_init(manager_nic->nic, manage, NULL);
 	
 	manager_server_open();
 	
@@ -511,23 +523,23 @@ uint32_t manager_get_ip() {
 	return manager_ip;
 }
 
-void manager_set_ip(uint32_t ip) {
-	if(manager_ni == NULL)
-		return;
+uint32_t manager_set_ip(uint32_t ip) {
+	if(manager_nic == NULL)
+		return 0;
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, manager_ip);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, manager_ip);
 	if(!interface)
-		return;
+		return 0;
 
-	if(!ni_ip_add(manager_ni->ni, ip))
-		return;
+	if(!nic_ip_add(manager_nic->nic, ip))
+		return 0;
 
-	IPv4Interface* _interface = ni_ip_get(manager_ni->ni, ip);
-	_interface->gateway = interface->gateway;
-	_interface->netmask = interface->netmask;
-	_interface->_default = interface->_default;
+//	IPv4Interface* _interface = nic_ip_get(manager_nic->nic, ip);
+//	_interface->gateway = interface->gateway;
+//	_interface->netmask = interface->netmask;
+//	_interface->_default = interface->_default;
 
-	ni_ip_remove(manager_ni->ni, manager_ip);
+	nic_ip_remove(manager_nic->nic, manager_ip);
 	manager_ip = ip;
 
 	struct ip_addr ip2;
@@ -536,6 +548,8 @@ void manager_set_ip(uint32_t ip) {
 
 	manager_server_close();
 	manager_server_open();
+
+	return manager_ip;
 }
 
 uint16_t manager_get_port() {
@@ -543,13 +557,13 @@ uint16_t manager_get_port() {
 }
 
 void manager_set_port(uint16_t port) {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return;
 
-	if(!udp_port_alloc0(manager_ni->ni, manager_ip, port))
+	if(!udp_port_alloc0(manager_nic->nic, manager_ip, port))
 		return;
 
-	udp_port_free(manager_ni->ni, manager_ip, manager_port);
+	udp_port_free(manager_nic->nic, manager_ip, manager_port);
 	manager_port = port;
 
 	manager_server_close();
@@ -557,10 +571,10 @@ void manager_set_port(uint16_t port) {
 }
 
 uint32_t manager_get_gateway() {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return 0;
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, manager_ip);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, manager_ip);
 	if(!interface)
 		return 0;
 
@@ -568,10 +582,10 @@ uint32_t manager_get_gateway() {
 }
 
 void manager_set_gateway(uint32_t gw) {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return;
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, manager_ip);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, manager_ip);
 	if(!interface)
 		return;
 
@@ -583,10 +597,10 @@ void manager_set_gateway(uint32_t gw) {
 }
 
 uint32_t manager_get_netmask() {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return 0;
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, manager_ip);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, manager_ip);
 	if(!interface)
 		return 0;
 
@@ -594,10 +608,10 @@ uint32_t manager_get_netmask() {
 }
 
 void manager_set_netmask(uint32_t nm) {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return;
 
-	IPv4Interface* interface = ni_ip_get(manager_ni->ni, manager_ip);
+	IPv4Interface* interface = nic_ip_get(manager_nic->nic, manager_ip);
 	if(!interface)
 		return;
 
@@ -609,11 +623,11 @@ void manager_set_netmask(uint32_t nm) {
 }
 
 void manager_set_interface() {
-	if(manager_ni == NULL)
+	if(manager_nic == NULL)
 		return;
 
 	manager_server_close();
-	ni_remove(manager_netif);
-	manager_netif = ni_init(manager_ni->ni, manage, NULL);
+	nic_remove(manager_netif);
+	manager_netif = nic_init(manager_nic->nic, manage, NULL);
 	manager_server_open();
 }

@@ -8,11 +8,14 @@
   * bridge-utils
   * libc6-dev-i386 
   * doxygen 
+  * graphviz
   * kpartx
   * bison
   * flex
   * cmake
+  * node.js
   * autoconf
+  * dcfldd
 
 * Disable automount-open
 gsettings set org.gnome.desktop.media-handling automount-open false
@@ -28,6 +31,9 @@ iface br0 inet manual
 	bridge_maxage 12
 	bridge_stp off
 
+# Register SSH key to github account
+	https://help.github.com/articles/generating-an-ssh-key/
+
 # Install submodules
 
 * Initilize submodules 
@@ -38,7 +44,7 @@ iface br0 inet manual
 	cd rtos/tools/grub
 	./autogen.sh
 	./configure
-	./make
+	make
 
 * Build cmocka
 	cd rtos/tools/cmocka

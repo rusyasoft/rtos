@@ -18,6 +18,10 @@ uint64_t timer_frequency() {
 
 void timer_init(const char* cpu_brand) {
 	// e.g. Intel(R) Core(TM) i7-3770 CPU @ 3.40GHz
+#ifdef LINUX
+	/* Linux don't need to calculate frequency */
+	return;
+#endif
 	if(strstr(cpu_brand, "Intel") != NULL && strstr(cpu_brand, "@ ") != NULL) {
 		int number = 0;
 		int is_dot_found = 0;
@@ -184,7 +188,7 @@ uint64_t timer_us() {
 	if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
 		return (uint64_t)-1;
 
-	return (uint64_t)(ts.tv_sec * 1000000);
+	return (uint64_t)(ts.tv_nsec / 1000 + ts.tv_sec * 1000000);
 
 #else /* LINUX */
 	/* (Current CPU Time Stamp Counter / CPU frequency per nano-seconds) */
@@ -198,7 +202,7 @@ uint64_t timer_ms() {
 	if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
 		return (uint64_t)-1;
 
-	return (uint64_t)(ts.tv_sec * 1000);
+	return (uint64_t)(ts.tv_nsec / 1000000 + ts.tv_sec * 1000);
 
 #else /* LINUX */
 	/* (Current CPU Time Stamp Counter / CPU frequency per nano-seconds) */

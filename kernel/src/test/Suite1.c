@@ -8,14 +8,12 @@
 
 #ifdef ACEUNIT_SUITES
 
-extern TestSuite_t file_testFixture;
-extern TestSuite_t lock_testFixture;
-extern TestSuite_t gmalloc_testFixture;
+extern TestSuite_t fileFixture;
+extern TestSuite_t gmallocFixture;
 
 const TestSuite_t *suitesOf1[] = {
-    &file_testFixture,
-    &lock_testFixture,
-    &gmalloc_testFixture,
+    &fileFixture,
+    &gmallocFixture,
     NULL
 };
 

@@ -2,7 +2,6 @@
 #define __NET_IP_H__
 
 #include <net/packet.h>
-#include <net/ether.h>
 
 /**
  * @file
@@ -10,7 +9,7 @@
  */
 
 #define IP_LEN			20	///< IPv4 header length
-#define IP_TTL			64	///< Default IPv4 TTL value
+#define IPDEFTTL		64	///< Default IPv4 TTL value
 
 #define IP_PROTOCOL_ICMP	0x01	///< IP protocol number for ICMP
 #define IP_PROTOCOL_IP          0x04	///< IP protocol number for IP
@@ -44,8 +43,6 @@ typedef struct _IP {
 	uint8_t		body[0];	///< IP body payload
 } __attribute__ ((packed)) IP;
 
-//uint32_t ip_alloc(NIC* nic);
-
 /**
  * Set IP length, TTL, checksum, and Packet->end index
  *
@@ -53,5 +50,5 @@ typedef struct _IP {
  * @param ip_body_len IP body length in bytes
  */
 void ip_pack(Packet* packet, uint16_t ip_body_len);
-
+ 
 #endif /* __NET_IP_H__ */

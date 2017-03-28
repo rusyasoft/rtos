@@ -166,7 +166,8 @@ void stdio_dump(int coreno, int fd, char* buffer, volatile size_t* head, volatil
 	char* dump_lines(char* h, char* e) {
 		char* t = strchrn(h, e, '\n');
 		while(t) {
-			t++;
+			// Skip newline and null charater
+			t += 2;
 			while(t - h > body_len) {
 				write1(header, header_len);
 				write1(h, body_len);
@@ -410,6 +411,7 @@ void stdio_scancode(int code) {
 	// Parse char scancode
 #define PUT()		ring_write(__stdin, __stdin_head, &__stdin_tail, __stdin_size, &ch, 1)
 
+	// ASCII escape: http://ascii-table.com/ansi-escape-sequences-vt-100.php
 	bool is_cap = false;
 	char ch;
 	if(extention > 0) {
@@ -438,6 +440,22 @@ void stdio_scancode(int code) {
 				ch = 'O';
 				PUT();
 				ch = 'F';
+				PUT();
+				break;
+			case 0x48:	// arrow up
+				ch = 0x1b;	// ESC
+				PUT();
+				ch = 'O';
+				PUT();
+				ch = 'A';
+				PUT();
+				break;
+			case 0x50:	// arrow down
+				ch = 0x1b;	// ESC
+				PUT();
+				ch = 'O';
+				PUT();
+				ch = 'B';
 				PUT();
 				break;
 			case 0x51:	// page down
@@ -787,7 +805,7 @@ int sprintf(char *str, const char *format, ...) {
 	return len;
 }
 
-int __sprintf_chk(int flag, char *str, const char *format, ...) {
+int __sprintf_chk(char *str, int flag, size_t slen, const char *format, ...) {
 	va_list va;
 	va_start(va, format);
 	int len = vsprintf(str, format, va);
