@@ -17,8 +17,10 @@
   * autoconf
   * dcfldd
 
-by command:
-apt-get install git nasm multiboot libcurl4-gnutls-dev qemu-kvm bridge-utils libc6-dev-i386 doxygen graphviz kpartx bison flex cmake nodejs autoconf dcfldd
+install by command:
+
+sudo apt-get update
+sudo apt-get install git nasm multiboot libcurl4-gnutls-dev qemu-kvm bridge-utils libc6-dev-i386 doxygen graphviz kpartx bison flex cmake nodejs autoconf dcfldd
 
 * Disable automount-open
 gsettings set org.gnome.desktop.media-handling automount-open false
